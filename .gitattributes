@@ -1,0 +1,2 @@
+# CSV·SQL·ctl은 LF 고정 (sqlldr가 \r을 값으로 읽지 않게)
+* text=auto eol=lf
