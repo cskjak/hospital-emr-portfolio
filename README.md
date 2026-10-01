@@ -164,3 +164,26 @@ scripts/generate_data.ps1  가상 데이터 생성기 (시드 고정)
    sqlldr userid=<계정>@//localhost:1521/FREEPDB1 control=sql/load/department.ctl
    ```
 3. 적재 후 행 수가 2번 표와 같은지 확인
+
+## 9. JOIN 키 검증
+
+`reception`과 `doctor`에는 `doctor_id`, `dept_id`가 둘 다 있다. 어느 쪽으로 잇는지에 따라 결과가 달라진다.
+
+| 연결 컬럼 | 결과 행 수 | 기준 (접수 9,362건) |
+|---|---:|---|
+| `doctor_id` | 9,362 | 일치 ✅ |
+| `dept_id` | 28,086 | 3배 ❌ |
+
+```sql
+-- A. doctor_id로 연결
+SELECT COUNT(*)
+FROM reception r
+JOIN doctor doc ON r.doctor_id = doc.doctor_id;   -- 9362
+
+-- B. dept_id로 연결
+SELECT COUNT(*)
+FROM reception r
+JOIN doctor doc ON r.dept_id = doc.dept_id;       -- 28086
+```
+
+**해석:** 접수를 진료과로 연결하면 접수 1건에 그 과 3명이 전부 붙어 3줄이 돼 그래서 결과 접수건수 3배인 28086건이 되고 doctor 표의 기본키인 의사 번호로 조인해야 정상적으로 확인이 가능해
