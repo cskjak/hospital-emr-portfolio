@@ -208,3 +208,34 @@ WHERE p.payment_id IS NULL
 ```
 
 **해석:** IS NULL은 말그대로 없는 칸 즉 값이 없는 null만 잡아내는거고, 575건에는 접수 취소 402건이 섞여 있었어. 접수 취소가 안된거 173건을 정상이라는 단어를 찾아서 골라냈어
+
+## 11. 접수를 전부 취소한 환자 찾기 (GROUP BY + HAVING)
+
+"취소한 적이 있는 환자"와 "접수가 전부 취소인 환자"는 다르다. 접수 한 줄씩 보면 앞의 것이 나오고, 환자별로 묶어야 뒤의 것이 나온다.
+
+| 쿼리 | 결과 (환자 수) | 기준 |
+|---|---:|---|
+| A. `COUNT(DISTINCT r.patient_id)` + `WHERE t.treatment_id IS NULL` | 389 | 취소한 접수가 하나라도 있는 환자 |
+| B. `GROUP BY r.patient_id` + `HAVING COUNT(t.treatment_id) = 0` | **108** | 접수가 전부 취소인 환자 ✅ |
+
+| 환자 | 접수 | 취소 | A (389) | B (108) |
+|---|---:|---:|:---:|:---:|
+| 10000032 | 1건 | 1건 | O | O |
+| 10000041 | 2건 | 1건 | O | X |
+
+```sql
+-- A. 389
+SELECT COUNT(DISTINCT r.patient_id)
+FROM reception r
+LEFT JOIN treatment t ON r.reception_id = t.reception_id
+WHERE t.treatment_id IS NULL;
+
+-- B. 108
+SELECT r.patient_id
+FROM reception r
+LEFT JOIN treatment t ON r.reception_id = t.reception_id
+GROUP BY r.patient_id
+HAVING COUNT(t.treatment_id) = 0;
+```
+
+**해석:** 환자 32번은 접수 1건이 전부 취소라서 389에도 108에도 들어가고 환자 41번은 접수 2건중 하나만 취소라서 389에만 포함돼. 108 을 구하려면 웨어절을 지우고 환자별 즉 patient_id 별로 묶은뒤 헤빙절 로 0 인 환자만 남겼어
