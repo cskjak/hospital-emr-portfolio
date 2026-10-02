@@ -187,3 +187,24 @@ JOIN doctor doc ON r.dept_id = doc.dept_id;       -- 28086
 ```
 
 **해석:** 접수를 진료과로 연결하면 접수 1건에 그 과 3명이 전부 붙어 3줄이 돼 그래서 결과 접수건수 3배인 28086건이 되고 doctor 표의 기본키인 의사 번호로 조인해야 정상적으로 확인이 가능해
+
+## 10. 미수납 찾기 (LEFT JOIN)
+
+미수납은 `payment`에 행이 **없는 것**으로 표현된다. 없는 행을 찾으려면 `LEFT JOIN`으로 접수를 전부 남긴 뒤, 짝이 없는 행을 골라낸다.
+
+| 단계 | 쿼리 | 결과 |
+|---|---|---:|
+| ① | `JOIN` | 8,787 |
+| ② | `LEFT JOIN` | 9,362 |
+| ③ | ② + `WHERE p.payment_id IS NULL` | 575 |
+| ④ | ③ + `AND r.status = '정상'` | **173** |
+
+```sql
+SELECT COUNT(*)
+FROM reception r
+LEFT JOIN payment p ON r.reception_id = p.reception_id
+WHERE p.payment_id IS NULL
+  AND r.status = '정상';                          -- 173
+```
+
+**해석:** IS NULL은 말그대로 없는 칸 즉 값이 없는 null만 잡아내는거고, 575건에는 접수 취소 402건이 섞여 있었어. 접수 취소가 안된거 173건을 정상이라는 단어를 찾아서 골라냈어
