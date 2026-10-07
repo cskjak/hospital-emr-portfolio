@@ -334,3 +334,32 @@ FETCH FIRST 1 ROWS ONLY;
 - A의 01월은 정해진 답이 아니다. 데이터나 실행 방식이 바뀌면 다른 달이 나올 수 있다.
 
 **해석:** A 는 오더 절이 없어서 76건이 나왔어 데이터가 바뀌거나 DB 가 처리방식을 바꾸면 다른 달이 나오는 경우의 수가 있고 B는 오더절 있어서 결과 건수를 카운트한걸 정렬해 근데 FETCH 절로 1행만 나왔어
+
+## 16. 순위 번호 붙이기 (RANK)
+
+`RANK()`는 `OVER ( )` 괄호 안 기준으로 **순위 번호만** 붙인다. 줄을 옮기는 건 맨 아래 `ORDER BY`다.
+
+```sql
+SELECT TO_CHAR(reception_at, 'YYYY-MM') AS 월,
+       COUNT(*),
+       RANK() OVER (ORDER BY COUNT(*) DESC) AS 순위
+FROM reception
+WHERE status = '취소'
+GROUP BY TO_CHAR(reception_at, 'YYYY-MM')
+ORDER BY 순위;
+```
+
+| 위치 | 하는 일 |
+|---|---|
+| `OVER ( )` 안의 `ORDER BY` | 순위 번호를 매기는 기준 (건수가 크면 1) |
+| 맨 아래 `ORDER BY` | 화면에 보이는 줄 순서 (순위 1 → 6) |
+
+| 순위 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---:|---:|---:|---:|---:|---:|
+| 월 | 04 | 01 | 06 | 03 | 05 | 02 |
+| 취소 | 88 | 76 | 75 | 60 | 56 | 47 |
+
+- `OVER ( )` 괄호 안은 RANK에 주는 기준 칸이다. 서브쿼리는 괄호 안이 `SELECT`로 시작한다.
+- 윈도우 함수는 `SELECT` 단계에서 만들어지므로 `SELECT`와 `ORDER BY`에서만 쓸 수 있다.
+
+**해석:** RANK는 카운트 기준으로 순위 붙였고 ORDER BY는 순위순으로 줄 세웠어
