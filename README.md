@@ -311,3 +311,26 @@ ORDER BY COUNT(*) DESC;
 | 취소 | 88 | 76 | 75 | 60 | 56 | 47 | **402** ✅ |
 
 **해석:** A는 월을 기준으로 큰 것부터 정렬해서 맨 위가 06월 75건이었고 B 는 카운트 취소건수가 많은걸 내림차순 정렬했고 그래서 결과 값의 차이가 둘에서 보였고
+
+## 15. 위에서 1줄만 자르기 (FETCH FIRST와 ORDER BY)
+
+`FETCH FIRST`는 결과를 위에서부터 자르기만 한다. 줄 순서를 정하는 건 `ORDER BY`뿐이라서, `ORDER BY` 없이 자르면 에러 없이 엉뚱한 줄이 남는다.
+
+| 쿼리 | ORDER BY | 결과 | 기준 (취소 최다 = 04월 88건) |
+|---|---|---|---|
+| A | 없음 | 2026-01 · 76건 | ❌ |
+| B | `COUNT(*) DESC` | **2026-04 · 88건** | ✅ |
+
+```sql
+-- B. 취소가 가장 많은 달 1개  (A는 ORDER BY 줄만 뺀 것)
+SELECT TO_CHAR(reception_at, 'YYYY-MM') AS 월, COUNT(*)
+FROM reception
+WHERE status = '취소'
+GROUP BY TO_CHAR(reception_at, 'YYYY-MM')
+ORDER BY COUNT(*) DESC
+FETCH FIRST 1 ROWS ONLY;
+```
+
+- A의 01월은 정해진 답이 아니다. 데이터나 실행 방식이 바뀌면 다른 달이 나올 수 있다.
+
+**해석:** A 는 오더 절이 없어서 76건이 나왔어 데이터가 바뀌거나 DB 가 처리방식을 바꾸면 다른 달이 나오는 경우의 수가 있고 B는 오더절 있어서 결과 건수를 카운트한걸 정렬해 근데 FETCH 절로 1행만 나왔어
