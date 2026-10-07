@@ -423,3 +423,26 @@ WHERE patient_id = 10000041;
 ```
 
 **해석:** a는 짝이 2개 딱 맞아서 정상이면 o 취소면 x 가 나오고 b는 정상은 o 취소는 짝도 나머지도 없어서 빈칸이 나와 c는 짝이 1개이고, 혼자 남은 X가 나머지라서 취소 줄에 X가 나와
+
+## 19. 월별 정상/취소를 쿼리 하나로 (SUM + DECODE)
+
+13번은 `WHERE`를 바꿔 가며 쿼리를 두 번 돌렸다. `DECODE`로 줄마다 1/0을 적고 `SUM`으로 더하면 쿼리 하나로 같은 표가 나온다.
+
+| 줄 | status | `DECODE(status,'정상',1,0)` | `DECODE(status,'취소',1,0)` |
+|---|---|:---:|:---:|
+| 3921 | 정상 | 1 | 0 |
+| 5332 | 취소 | 0 | 1 |
+
+```sql
+SELECT TO_CHAR(reception_at, 'YYYY-MM') AS 월,
+       COUNT(*) AS 전체,
+       SUM(DECODE(status, '정상', 1, 0)) AS 정상,
+       SUM(DECODE(status, '취소', 1, 0)) AS 취소
+FROM reception
+GROUP BY TO_CHAR(reception_at, 'YYYY-MM')
+ORDER BY 월;
+```
+
+결과는 13번 표와 6줄 모두 같다. 줄마다 정상 + 취소 = 전체가 맞는다.
+
+**해석:** DECODE 로 줄마다 정상이면 1 아니면 0 을 적고 SUM 으로 더해서 월별 정상 건수가 됐어
