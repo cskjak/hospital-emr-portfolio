@@ -644,3 +644,91 @@ ORDER BY 접수시;
 오전·오후 모두 일찍 접수할수록 오래 기다린다. 접수는 08:20·12:50부터 받지만 진료는 09:00·13:30에 시작한다(4번 표).
 
 **해석:** 1. 진료 시작 시각 빼기 접수 시각을 분으로 계산해서 3줄만 보여줬어 2.진료과별 평균 대기시간을 계산했는데 진료과별 평균 대기시간을 디파트먼트 네임 즉 진료과 이름 별로 평균 대기시간을 계산했고 그걸 내림차순 한거고 3.조인 절로 테이블이 다르니 이너조인으로 매칭하고 셀렉트절에서 시간을 문자열로 반환 하하고 시간으로 그리고 접수시별로 묶어서 평균 대기시간을 계산하고 오더바이절로 접수시 즉 시간별로 정렬했어
+
+## 24. 대기 시간을 구간으로 나누기 (CASE WHEN)
+
+`DECODE`(18번)는 **같은 글자인가**만 판정한다. `CASE WHEN`은 `< 30` 같은 **크기 비교**도 할 수 있다.
+
+**① 줄마다 구간 이름 붙이기**
+
+```sql
+SELECT t.treatment_id, (t.start_at - r.reception_at) * 24 * 60 AS 대기분,
+       CASE
+         WHEN (t.start_at - r.reception_at) * 24 * 60 < 30 THEN '30분 미만'
+         WHEN (t.start_at - r.reception_at) * 24 * 60 < 50 THEN '30~50분'
+         ELSE '50분 이상'
+       END AS 구간
+FROM treatment t
+JOIN reception r ON t.reception_id = r.reception_id
+FETCH FIRST 3 ROWS ONLY;
+```
+
+줄마다 위의 `WHEN`부터 차례로 검사하고, **처음 맞는 곳에서 멈춘다.**
+
+| 줄 | 대기분 | `< 30` | `< 50` | ELSE | 구간 |
+|---|---:|---|---|---|---|
+| 259 | 19.73 | ✅ 멈춤 | (검사 안 함) | | 30분 미만 |
+| 260 | 42.58 | ❌ | ✅ 멈춤 | | 30~50분 |
+| 258 | 52.95 | ❌ | ❌ | ✅ | 50분 이상 |
+
+259는 `< 50`에도 맞지만 첫 `WHEN`에서 멈췄으므로 30~50분이 되지 않는다.
+
+**② 구간별 건수**
+
+```sql
+SELECT CASE
+         WHEN (t.start_at - r.reception_at) * 24 * 60 < 30 THEN '30분 미만'
+         WHEN (t.start_at - r.reception_at) * 24 * 60 < 50 THEN '30~50분'
+         ELSE '50분 이상'
+       END AS 구간, COUNT(*)
+FROM treatment t
+JOIN reception r ON t.reception_id = r.reception_id
+GROUP BY CASE
+         WHEN (t.start_at - r.reception_at) * 24 * 60 < 30 THEN '30분 미만'
+         WHEN (t.start_at - r.reception_at) * 24 * 60 < 50 THEN '30~50분'
+         ELSE '50분 이상'
+       END
+ORDER BY MIN((t.start_at - r.reception_at) * 24 * 60);
+```
+
+| 구간 | 건수 |
+|---|---:|
+| 30분 미만 | 4,260 |
+| 30~50분 | 2,868 |
+| 50분 이상 | 1,832 |
+| 합계 | 8,960 |
+
+`ORDER BY 구간`으로 정렬하면 **글자 순서**라서 `30~50분`이 `30분 미만`보다 먼저 나온다(`~`가 `분`보다 앞). 구간마다 가장 작은 대기분(`MIN`)으로 정렬하면 크기 순서가 된다.
+
+**③ 진료과별 × 구간** (19번 `SUM(DECODE(...))`와 같은 방식)
+
+```sql
+SELECT d.dept_name, COUNT(*) AS 전체,
+       SUM(CASE WHEN (t.start_at - r.reception_at) * 24 * 60 < 30 THEN 1 ELSE 0 END) AS 짧음,
+       SUM(CASE WHEN (t.start_at - r.reception_at) * 24 * 60 >= 30
+                 AND (t.start_at - r.reception_at) * 24 * 60 < 50 THEN 1 ELSE 0 END) AS 중간,
+       SUM(CASE WHEN (t.start_at - r.reception_at) * 24 * 60 >= 50 THEN 1 ELSE 0 END) AS 김
+FROM treatment t
+JOIN reception r ON t.reception_id = r.reception_id
+JOIN department d ON r.dept_id = d.dept_id
+GROUP BY d.dept_name
+ORDER BY 김 DESC;
+```
+
+여기서는 `CASE`가 칸마다 따로라서 "처음 맞는 곳에서 멈춤"이 칸끼리 이어지지 않는다. 그래서 `중간`에는 `>= 30 AND < 50` 두 조건을 다 쓴다.
+
+| 진료과 | 전체 | 짧음 (30분 미만) | 중간 (30~50분) | 김 (50분 이상) |
+|---|---:|---:|---:|---:|
+| 소화기내과 | 1,590 | 443 | 566 | 581 |
+| 정형외과 | 1,485 | 476 | 477 | 532 |
+| 순환기내과 | 1,210 | 564 | 453 | 193 |
+| 피부과 | 1,016 | 501 | 348 | 167 |
+| 내분비내과 | 1,091 | 595 | 358 | 138 |
+| 소아청소년과 | 811 | 478 | 229 | 104 |
+| 안과 | 880 | 598 | 216 | 66 |
+| 신경과 | 877 | 605 | 221 | 51 |
+| 합계 | 8,960 | 4,260 | 2,868 | 1,832 |
+
+세로 합계는 ②와 같고, 가로 합계(짧음 + 중간 + 김)는 전체와 같다. 평균 대기 시간(23번)은 2배 차이지만 50분 이상 기다린 건수는 소화기내과 581, 신경과 51로 10배 넘게 차이 난다.
+
+**해석:** 1. 두시각을 뺀 값 즉 대기분을 구간으로 나눴어 30~50분 기준 2. 일정 분 마다 구간별로 건수를 계산했어 그리고 3. 진료과는 줄로 묶고 구간별 칸은 SUM으로 합산했어
