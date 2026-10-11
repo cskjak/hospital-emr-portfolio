@@ -483,3 +483,41 @@ ORDER BY COUNT(*) DESC;
 - B의 합계 8,960은 13번 표의 정상 접수 합계와 같다.
 
 **해석:** 콜레쓰는 빈칸을 지정한 값 즉 미수납으로 채우고 빈칸인지만 판단해서 취소 402건도 미수납으로 됐어 콜레스 때문에. 웨어를 넣어서 미수납만 173건으로 집어 냈고
+
+## 21. 빈칸이 있는 칸 세기와 평균 (COUNT · AVG · COALESCE)
+
+정상 접수 8,960건 중 수납이 없는 173건은 `p.total_amount`가 NULL이다. 같은 칸으로 세고 평균을 내도 함수에 따라 분모가 달라진다.
+
+```sql
+SELECT COUNT(*), COUNT(p.total_amount), SUM(p.total_amount),
+       AVG(p.total_amount), AVG(COALESCE(p.total_amount,0))
+FROM reception r
+LEFT JOIN payment p ON r.reception_id = p.reception_id
+WHERE r.status = '정상';
+```
+
+| 칸 | 결과 | 세는 줄 |
+|---|---:|---|
+| `COUNT(*)` | 8,960 | 모든 줄 |
+| `COUNT(p.total_amount)` | 8,787 | 금액이 있는 줄 |
+| `SUM(p.total_amount)` | 669,606,690 | 금액이 있는 줄 |
+| 평균A `AVG(p.total_amount)` | 76,204.24 | 669,606,690 ÷ **8,787** |
+| 평균B `AVG(COALESCE(p.total_amount,0))` | 74,732.89 | 669,606,690 ÷ **8,960** |
+
+합계는 같고 분모만 다르다. `COALESCE`로 173줄에 0이 들어가면 그 줄도 센다.
+
+**진료 1건당 평균 진료비는 A**
+
+B는 173건 자리에 0을 넣는다. 수납된 8,787건에는 진료비 0원인 건이 없다.
+
+```sql
+SELECT MIN(total_amount) FROM payment;                 -- 18000
+SELECT COUNT(*) FROM payment WHERE total_amount = 0;   -- 0
+```
+
+| 구하는 것 | 173건 자리 | 쓸 평균 |
+|---|---|:---:|
+| 진료 1건당 평균 진료비 | 진료비가 기록되지 않음 → 계산에서 뺌 | A |
+| 접수 1건당 실제로 들어온 돈의 평균 | 들어온 돈 0원 | B |
+
+**해석:** 184번줄에서 확인 했듯이 빈칸이야 원래는 0원은 단지 내가 조회햇을때 0 원으로 만들고 조회 한거라서 결과가 다른 거고 진료비 평균에는 왜 a 를 쓰냐면 실제론 빈칸을 제외하고 조회 하기 때문이야 실제로 기록된 진료비로만 평균을 내서
