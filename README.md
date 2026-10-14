@@ -1200,3 +1200,70 @@ ORDER BY m.menu_id;
 | 403 | 대기 시간 통계 | N |
 
 **해석:** 1. 역할별로 의사 원무가 메뉴 권한 7개로 가장 많고 그다음으로 전산,간호사,약제 순으로 메뉴 권한수가 나열 돼 2. 간호사 메뉴권한은 4개이지만 보기만 할수 있다
+
+## 32. 아무 역할도 못 보는 메뉴 (LEFT JOIN + IS NULL)
+
+10번 미수납과 같은 모양이다. 왼쪽 표의 줄은 짝이 없어도 전부 남기고, 짝이 없는 줄은 오른쪽 칸이 빈칸이 된다.
+
+| | 10번 미수납 | 32번 |
+|---|---|---|
+| 왼쪽 (전부 남김) | `reception r` | `menu m` |
+| 오른쪽 (짝이 없을 수도 있음) | `payment p` | `role_menu rm` |
+| 짝 없는 줄 찾기 | `p.payment_id IS NULL` | `rm.role_id IS NULL` |
+
+`LEFT JOIN`은 메뉴 한 줄마다 `menu_id`가 같은 권한 줄을 전부 붙인다 (예: 101 접수는 의사·간호사·원무 → 3줄). 짝이 없는 메뉴는 1줄로 남고 `rm` 칸이 빈칸이다.
+
+### ① 권한 줄이 없는 메뉴
+
+```sql
+SELECT m.menu_id, m.menu_name, m.parent_id
+FROM menu m
+LEFT JOIN role_menu rm ON m.menu_id = rm.menu_id
+WHERE rm.role_id IS NULL
+ORDER BY m.menu_id;
+```
+
+| menu_id | menu_name | parent_id |
+|---:|---|---:|
+| 100 | 외래 | |
+| 200 | 원무 | |
+| 300 | 약제 | |
+| 400 | 통계 | |
+| 500 | 시스템 관리 | |
+| 504 | 공지사항 관리 | 500 |
+
+6줄 중 5줄은 `parent_id`가 빈칸인 **맨 위 메뉴**다. 맨 위 메뉴는 아래 메뉴를 모아 둔 제목이고, 이 데이터는 권한을 아래 메뉴에만 준다(31번). 그래서 권한 줄이 없는 게 원래 그렇다.
+
+### ② 아래 메뉴만 남기기
+
+```sql
+SELECT m.menu_id, m.menu_name, m.parent_id
+FROM menu m
+LEFT JOIN role_menu rm ON m.menu_id = rm.menu_id
+WHERE rm.role_id IS NULL
+  AND m.parent_id IS NOT NULL
+ORDER BY m.menu_id;
+```
+
+| menu_id | menu_name | parent_id |
+|---:|---|---:|
+| 504 | 공지사항 관리 | 500 |
+
+`WHERE`의 두 줄은 서로 다른 테이블의 칸을 본다.
+
+| 조건 | 테이블 | 504의 값 | 뜻 |
+|---|---|---|---|
+| `rm.role_id IS NULL` | role_menu (권한) | 빈칸 | 권한 줄이 없다 → 못 봄 |
+| `m.parent_id IS NOT NULL` | menu (메뉴) | 500 | 위에 메뉴가 있다 → 아래 메뉴 |
+
+```
+500 시스템 관리
+ ├ 501 사용자 관리       ← 전산
+ ├ 502 메뉴 권한 관리    ← 전산
+ ├ 503 SMS 발송내역      ← 전산
+ └ 504 공지사항 관리     ← 아무도 없음
+```
+
+**검산:** `SELECT * FROM role_menu WHERE menu_id = 504;` → `선택된 레코드가 없습니다` (0줄)
+
+**해석:** 아무 역할도 못 보는 메뉴는 공지사항 관리이다. role_menu 테이블에 504 줄이 없기 때문이다.
