@@ -1267,3 +1267,50 @@ ORDER BY m.menu_id;
 **검산:** `SELECT * FROM role_menu WHERE menu_id = 504;` → `선택된 레코드가 없습니다` (0줄)
 
 **해석:** 아무 역할도 못 보는 메뉴는 공지사항 관리이다. role_menu 테이블에 504 줄이 없기 때문이다.
+
+## 33. 직원 1명이 볼 수 있는 메뉴 (테이블 3개 JOIN · 퇴사 제외)
+
+직원에서 메뉴 이름까지 가려면 테이블 3개를 거친다. 테이블 사이는 같은 이름 칸으로 잇는다.
+
+```
+staff s ──role_id── role_menu rm ──menu_id── menu m
+(직원)              (역할-메뉴 권한)          (메뉴 이름)
+```
+
+### ① 재직 간호사 20025
+
+```sql
+SELECT s.staff_name, m.menu_id, m.menu_name, rm.can_write
+FROM staff s
+JOIN role_menu rm ON s.role_id = rm.role_id
+JOIN menu m       ON rm.menu_id = m.menu_id
+WHERE s.staff_id = 20025
+  AND s.status = '재직'
+ORDER BY m.menu_id;
+```
+
+| staff_name | menu_id | menu_name | can_write |
+|---|---:|---|---|
+| 김윤유 | 101 | 접수 | N |
+| 김윤유 | 102 | 진료기록 | N |
+| 김윤유 | 104 | 외래 일정 | N |
+| 김윤유 | 403 | 대기 시간 통계 | N |
+
+31번 ② 간호사 메뉴 4줄과 같다.
+
+### ② 퇴사 간호사 20033
+
+①에서 `20025`만 `20033`으로 바꿨다. → `선택된 레코드가 없습니다` (0줄)
+
+### ③ 검산: `status` 조건을 빼면
+
+②에서 `AND s.status = '재직'` 줄만 지웠다. → 4줄 (101 · 102 · 104 · 403, ①과 같은 메뉴)
+
+| 직원 | role_id | status | `s.status = '재직'` 있음 | 없음 |
+|---|---:|---|---:|---:|
+| 20025 김윤유 | 2 | 재직 | 4줄 | 4줄 |
+| 20033 최채도 | 2 | 퇴사 | **0줄** | 4줄 |
+
+`role_menu`는 역할(`role_id`)만 보고 메뉴를 준다. 퇴사 여부는 `staff.status`에만 있어서, 퇴사자를 빼는 건 `WHERE`의 `status` 조건 한 줄이다.
+
+**해석:** 같은 간호사 role id 2 인데 20025는 4줄 20033은 0줄이다. 20033은 재직상태가 아니라서 그렇고 웨어절로 재직상태를 지우고 조회하면 조회가 가능하다.
