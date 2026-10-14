@@ -19,6 +19,15 @@ department ──< doctor ──< doctor_schedule
 
 `──<` 는 "하나 → 여러 개" 입니다. 예: 진료과 1개에 의사 여러 명.
 
+**권한 테이블** (2단계, 30번부터 사용)
+
+```
+role ──< staff >──── doctor      (의사만 이어짐)
+  │        └──────── department  (의사·간호사만 이어짐)
+  │
+  └──< role_menu >── menu ──< menu  (상위 메뉴 → 하위 메뉴)
+```
+
 ## 2. 테이블 요약
 
 | 파일 | 행 수 | 한 행의 의미 |
@@ -30,6 +39,10 @@ department ──< doctor ──< doctor_schedule
 | `reception.csv` | 9,362 | 접수 한 건 (취소 402건 포함) |
 | `treatment.csv` | 8,960 | 진료 한 건 (취소 안 된 접수마다 1건) |
 | `payment.csv` | 8,787 | 수납 한 건 (미수납 173건은 행이 없음) |
+| `role.csv` | 5 | 역할 하나 (의사 · 간호사 · 원무 · 약제 · 전산) |
+| `staff.csv` | 57 | 직원 한 명 (의사 24명은 `doctor`와 같은 사람 · 퇴사 3명 포함) |
+| `menu.csv` | 21 | 메뉴 하나 (상위 메뉴 5개 + 하위 메뉴 16개) |
+| `role_menu.csv` | 27 | 역할 하나가 메뉴 하나를 볼 수 있다는 권한 한 칸 |
 
 ## 3. 컬럼 설명
 
@@ -103,6 +116,42 @@ department ──< doctor ──< doctor_schedule
 
 - 항상 `total_amount = insurance_amount + patient_amount`
 
+### role — 역할
+| 컬럼 | 형식 | 설명 |
+|---|---|---|
+| role_id | 정수 | 기본키 (1~5) |
+| role_code | 문자 | DOC, NUR, ADM, PHA, ITS |
+| role_name | 문자 | 의사, 간호사, 원무, 약제, 전산 |
+
+### staff — 직원
+| 컬럼 | 형식 | 설명 |
+|---|---|---|
+| staff_id | 정수 | 기본키 (20001~20057) |
+| staff_name | 문자 | 가상 이름 (의사는 `doctor.doctor_name`과 같음) |
+| role_id | 정수 | → role.role_id |
+| dept_id | 정수 | → department.dept_id (의사·간호사만, 나머지는 빈칸) |
+| doctor_id | 정수 | → doctor.doctor_id (의사만, 나머지는 빈칸) |
+| hire_date | 날짜 | 입사일 |
+| status | 문자 | 재직 / 퇴사 |
+
+### menu — 메뉴
+| 컬럼 | 형식 | 설명 |
+|---|---|---|
+| menu_id | 정수 | 기본키 (상위 100·200·…·500, 하위 101·102·…) |
+| menu_name | 문자 | 접수, 진료기록, 수납 등 일반적인 업무 이름 |
+| parent_id | 정수 | → menu.menu_id (상위 메뉴 · 맨 위 메뉴는 빈칸) |
+| sort_order | 정수 | 같은 상위 메뉴 안에서의 순서 |
+
+### role_menu — 역할-메뉴 권한
+| 컬럼 | 형식 | 설명 |
+|---|---|---|
+| role_id | 정수 | → role.role_id |
+| menu_id | 정수 | → menu.menu_id |
+| can_write | 문자 1자리 | Y (고치기 가능) / N (보기만) |
+
+- 기본키는 **두 컬럼을 합친 것** (role_id + menu_id)
+- 행이 **있으면** 그 메뉴를 볼 수 있음 · 권한은 하위 메뉴에만 줌
+
 ## 4. 데이터에 넣은 규칙
 
 | 규칙 | 내용 |
@@ -153,16 +202,19 @@ department ──< doctor ──< doctor_schedule
 환경: Oracle AI Database 26ai Free · 문자셋 AL32UTF8
 
 ```
-sql/01_create_tables.sql   테이블 7개 생성 (PK · FK · CHECK 포함)
-sql/load/*.ctl             SQL*Loader 설정 (CSV → 테이블)
-scripts/generate_data.ps1  가상 데이터 생성기 (시드 고정)
+sql/01_create_tables.sql       테이블 7개 생성 (PK · FK · CHECK 포함)
+sql/02_create_auth_tables.sql  권한 테이블 4개 생성 (01번 다음에 실행)
+sql/load/*.ctl                 SQL*Loader 설정 (CSV → 테이블)
+scripts/generate_data.ps1      가상 데이터 생성기 (시드 고정)
+scripts/generate_auth.ps1      권한 테이블 데이터 생성기 (시드 고정)
 ```
 
-1. SQL*Plus에서 `@sql/01_create_tables.sql`
-2. 부모 테이블부터 적재: department → doctor → doctor_schedule → patient → reception → treatment → payment
+1. SQL*Plus에서 `@sql/01_create_tables.sql` → `@sql/02_create_auth_tables.sql`
+2. 부모 테이블부터 적재: department → doctor → doctor_schedule → patient → reception → treatment → payment → role → menu → staff → role_menu
    ```
    sqlldr userid=<계정>@//localhost:1521/FREEPDB1 control=sql/load/department.ctl
    ```
+   SQL*Plus 안에서 실행할 때는 앞에 `HOST`를 붙인다.
 3. 적재 후 행 수가 2번 표와 같은지 확인
 
 ## 9. JOIN 키 검증
@@ -1058,3 +1110,41 @@ GROUP BY r.visit_type;
 723번은 722번보다 1분 늦게 접수해서, 722번 진료가 끝난(09:46) 뒤에야 시작했다(09:47). 초진 722번의 긴 진료 12.5분은 뒷사람 723번의 대기에 들어갔다.
 
 **해석:** 진료 시간은 초진 11.5 vs 재진 5.5로 두 배 차이지만, 대기 시간은 초진 32.8 vs 재진 32.7로 비슷하다. 대기는 앞사람의 진료 시간으로 정해지기 때문이다.
+
+## 30. 역할별 직원 수 (권한 테이블 첫 조회)
+
+권한 테이블 4개(`role` · `staff` · `menu` · `role_menu`)를 추가했다 → 1·2·3·8번 참고. 직원(`staff`)과 역할(`role`) 둘 다 `role_id`가 있어서 같은 이름 칸끼리 잇는다. 27번에서 `doctor_id`로 이은 것과 같은 모양이다. 접수 별칭 `r`과 겹치지 않게 역할은 `ro`로 쓴다.
+
+### ① 전체 직원
+
+```sql
+SELECT ro.role_name, COUNT(*) AS 직원수
+FROM staff s
+JOIN role ro ON s.role_id = ro.role_id
+GROUP BY ro.role_name
+ORDER BY 직원수 DESC;
+```
+
+### ② 재직 직원만
+
+`staff`의 `status`는 재직 / 퇴사다. `reception`에도 `status`(정상 / 취소)가 있지만 테이블이 다르면 다른 칸이라 `s.`을 붙인다. ①과 다른 곳은 `WHERE` 한 줄뿐이다.
+
+```sql
+SELECT ro.role_name, COUNT(*) AS 직원수
+FROM staff s
+JOIN role ro ON s.role_id = ro.role_id
+WHERE s.status = '재직'
+GROUP BY ro.role_name
+ORDER BY 직원수 DESC;
+```
+
+| 역할 | ① 전체 | ② 재직만 |
+|---|---:|---:|
+| 의사 | 24 | 24 |
+| 간호사 | 16 | 14 |
+| 원무 | 8 | 8 |
+| 약제 | 5 | 5 |
+| 전산 | 4 | 3 |
+| 합계 | 57 | 54 |
+
+**해석:** 전체 57명 중 재직만 세면 54명이다. 퇴사자가 있는 역할은 간호사와 전산이다.
