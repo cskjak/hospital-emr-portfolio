@@ -1513,3 +1513,67 @@ ORDER BY ro.role_id, m.menu_id;
 간호사는 볼 수 있는 메뉴 4개(31번 ②)가 전부 `can_write = 'N'`이라서 결과에 한 줄도 없다.
 
 **해석:** 의사·약제·원무·전산에서 고칠 수 있는 메뉴 이름들을 Y로 나타냈다. 그래서 27줄 중 10줄이고 간호사가 볼 수 있는 메뉴는 4개이나 Y가 0개라서 결과에 없다.
+
+## 38. 역할별 볼 수 있는 메뉴 수 vs 고칠 수 있는 메뉴 수 (SUM + DECODE · WHERE와 비교)
+
+31번 ①(볼 수 있는 메뉴 수)에 19번 방식(`SUM(DECODE(...))`)으로 칸 하나를 더 붙여, 37번의 고칠 수 있는 메뉴 수를 같은 표에 놓는다.
+
+### ① SUM(DECODE)
+
+줄마다 `can_write`가 `Y`면 1, 아니면 0을 적고 `SUM`으로 더한다.
+
+```sql
+SELECT ro.role_name,
+       COUNT(*)                              AS 볼수있는,
+       SUM(DECODE(rm.can_write, 'Y', 1, 0)) AS 고칠수있는
+FROM role_menu rm
+JOIN role ro ON rm.role_id = ro.role_id
+GROUP BY ro.role_id, ro.role_name
+ORDER BY ro.role_id;
+```
+
+| role_name | 볼수있는 | 고칠수있는 |
+|---|---:|---:|
+| 의사 | 7 | 2 |
+| 간호사 | 4 | **0** |
+| 원무 | 7 | 4 |
+| 약제 | 3 | 2 |
+| 전산 | 6 | 2 |
+| 합계 | 27 | 10 |
+
+37번 표와 숫자 5쌍이 모두 같다.
+
+### ② WHERE로 먼저 거르면
+
+①에서 `SUM(DECODE(...))` 줄을 빼고, 37번의 `WHERE rm.can_write = 'Y'`를 넣었다.
+
+```sql
+SELECT ro.role_name, COUNT(*) AS 고칠수있는
+FROM role_menu rm
+JOIN role ro ON rm.role_id = ro.role_id
+WHERE rm.can_write = 'Y'
+GROUP BY ro.role_id, ro.role_name
+ORDER BY ro.role_id;
+```
+
+| role_name | 고칠수있는 |
+|---|---:|
+| 의사 | 2 |
+| 원무 | 4 |
+| 약제 | 2 |
+| 전산 | 2 |
+
+| 방법 | 줄 수 | 간호사 줄 |
+|---|---:|---|
+| ① `SUM(DECODE(...))` | 5 | 남음 · 고칠수있는 0 |
+| ② `WHERE` + `COUNT(*)` | 4 | 없음 |
+
+| 순서 | ① | ② |
+|---|---|---|
+| FROM + JOIN | 27줄 (간호사 4줄 포함) | 27줄 (간호사 4줄 포함) |
+| WHERE | 없음 → 27줄 | `Y`만 남김 → 10줄 (간호사 4줄은 전부 `N`) |
+| GROUP BY | 5묶음 · 간호사는 0을 더해 0 | 4묶음 · 간호사는 묶을 줄이 없음 |
+
+`WHERE`는 세기 전에 줄을 지우고, `SUM(DECODE(...))`는 줄을 남긴 채 0을 적는다.
+
+**해석:** ①은 간호사 줄이 남고 고칠수있는 칸은 0 이다. ②는 4줄이고 간호사 줄이 없다. 간호사 4줄은 can_write가 전부 N이라서 웨어절에서 지워졌기 때문이다.
