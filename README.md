@@ -1691,3 +1691,66 @@ ORDER BY s.staff_id;
 `role_menu`에서 102 진료기록 줄은 의사 `Y` · 간호사 `N` 두 줄뿐이라, 고칠 수 있는 역할은 의사 하나다.
 
 **해석:** can_write 조건이 없으면 38행으로 더 많고, can_write 조건이 있으면 24행으로 더 적어진다. 빠진 14행은 전부 간호사 N 이고 진료 기록을 고칠수 있는 재직 직원은 전부 의사이다.
+
+## 41. 인덱스 전후 실행계획 비교 (EXPLAIN PLAN · INDEX RANGE SCAN)
+
+환자 한 명(10000102)의 접수를 찾는 같은 쿼리를, `patient_id`에 인덱스가 없을 때와 있을 때 실행계획으로 비교한다. `reception`은 9,362줄 · 58블록이고, 10000102의 접수는 3줄이다.
+
+### ① 인덱스 없음
+
+```sql
+EXPLAIN PLAN FOR
+SELECT * FROM reception WHERE patient_id = 10000102;
+
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
+```
+
+```
+| Id  | Operation         | Name      | Rows  | Bytes | Cost (%CPU)|
+|   0 | SELECT STATEMENT  |           |     2 |    78 |    17   (0)|
+|*  1 |  TABLE ACCESS FULL| RECEPTION |     2 |    78 |    17   (0)|
+
+   1 - filter("PATIENT_ID"=10000102)
+```
+
+### ② 인덱스 만들기
+
+```sql
+CREATE INDEX idx_reception_patient ON reception(patient_id);
+```
+
+### ③ 인덱스 있음 (①과 같은 쿼리)
+
+```
+| Id  | Operation                           | Name                  | Rows  | Bytes | Cost (%CPU)|
+|   0 | SELECT STATEMENT                    |                       |     2 |    78 |     3   (0)|
+|   1 |  TABLE ACCESS BY INDEX ROWID BATCHED| RECEPTION             |     2 |    78 |     3   (0)|
+|*  2 |   INDEX RANGE SCAN                  | IDX_RECEPTION_PATIENT |     2 |       |     1   (0)|
+
+   2 - access("PATIENT_ID"=10000102)
+```
+
+실행계획은 들여쓰기가 가장 깊은 줄(Id 2)부터 위로 읽는다.
+
+### 인덱스 안에 든 것 (실제 값)
+
+| patient_id (정렬됨) | 줄이 있는 블록 |
+|---:|---|
+| 10000101 | 941 · 961 |
+| 10000102 | 938 · 947 · 966 |
+| 10000103 | 915 · 937 · 962 |
+
+테이블은 접수 순서로 저장돼 있어서 10000102의 3줄이 블록 938 · 947 · 966에 흩어져 있다. 인덱스는 `patient_id` 순서로 정렬돼 있어 3줄이 붙어 있고, 줄마다 주소(ROWID)를 갖고 있다. (블록 번호는 `DBMS_ROWID.ROWID_BLOCK_NUMBER(ROWID)`로 확인)
+
+### 비교
+
+| | ① 인덱스 없음 | ③ 인덱스 있음 |
+|---|---|---|
+| 읽는 방법 | `TABLE ACCESS FULL` | `INDEX RANGE SCAN` → `TABLE ACCESS BY INDEX ROWID` |
+| Predicate | `filter` (다 읽고 거름) | `access` (그 값이 있는 곳으로 찾아감) |
+| 읽는 양 | 테이블 58블록 전부 | 인덱스 3줄 + 테이블 블록 3개 |
+| Cost | 17 | 3 |
+
+9,362줄은 작은 테이블이라 Time은 둘 다 00:00:01이고, 차이는 Cost에서만 보인다. Rows 2는 Oracle의 예상값(환자 1명당 평균 1.9건)이고 실제는 3줄이다.
+
+**해석:** 인덱스가 없으면 테이블 58블록 전부를 읽고 Cost는 17, 인덱스를 만들면 인덱스에서 3줄, 테이블에서 블록 3개만 읽고 Cost는 3이다.
