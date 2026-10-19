@@ -1632,3 +1632,61 @@ ORDER BY m.menu_id;
 `Y`인 줄을 찾으면 그 줄의 `role_id`는 항상 채워져 있다. 그래서 ①은 어떤 데이터에서도 0줄이다.
 
 **해석:** 웨어절에 Y 를 두면 0 줄 on 에 두면 11줄이 나왔다. 104 외래 일정은 on 절에 둬야 결과에 나온다.
+
+## 40. 진료기록을 고칠 수 있는 재직 직원 (테이블 4개 JOIN)
+
+33번(직원 → 메뉴, 테이블 3개)에 `role`을 붙여 역할 이름까지 본다. 37번 조건 `rm.can_write = 'Y'`를 뺄 때와 넣을 때를 비교한다.
+
+```
+role ro ──role_id── staff s ──role_id── role_menu rm ──menu_id── menu m
+(역할 이름)          (직원)              (역할-메뉴 권한)          (메뉴 이름)
+```
+
+### ① 볼 수 있는 재직 직원 (`can_write` 조건 없음)
+
+```sql
+SELECT s.staff_id, s.staff_name, ro.role_name, m.menu_name, rm.can_write
+FROM staff s
+JOIN role ro      ON s.role_id = ro.role_id
+JOIN role_menu rm ON s.role_id = rm.role_id
+JOIN menu m       ON rm.menu_id = m.menu_id
+WHERE m.menu_id = 102
+  AND s.status = '재직'
+ORDER BY s.staff_id;
+```
+
+38줄. 의사 24명(20001~20024)은 `Y`, 간호사 14명은 `N`이다. 퇴사 간호사 20033 · 20037은 33번처럼 `status` 조건에서 빠졌다.
+
+### ② 고칠 수 있는 재직 직원 (`can_write = 'Y'`)
+
+①의 `WHERE`에 `AND rm.can_write = 'Y'` 한 줄을 넣었다.
+
+```sql
+SELECT s.staff_id, s.staff_name, ro.role_name, m.menu_name, rm.can_write
+FROM staff s
+JOIN role ro      ON s.role_id = ro.role_id
+JOIN role_menu rm ON s.role_id = rm.role_id
+JOIN menu m       ON rm.menu_id = m.menu_id
+WHERE m.menu_id = 102
+  AND rm.can_write = 'Y'
+  AND s.status = '재직'
+ORDER BY s.staff_id;
+```
+
+| staff_id | staff_name | role_name | menu_name | can_write |
+|---:|---|---|---|---|
+| 20001 | 류지태 | 의사 | 진료기록 | Y |
+| 20002 | 윤상성 | 의사 | 진료기록 | Y |
+| … | … | … | … | … |
+| 20024 | 이호성 | 의사 | 진료기록 | Y |
+
+24줄, 전부 의사다.
+
+| | `can_write` 조건 | 줄 수 | 의사 (`Y`) | 간호사 (`N`) |
+|---|---|---:|---:|---:|
+| ① | 없음 | 38 | 24 | 14 |
+| ② | `= 'Y'` | 24 | 24 | 0 |
+
+`role_menu`에서 102 진료기록 줄은 의사 `Y` · 간호사 `N` 두 줄뿐이라, 고칠 수 있는 역할은 의사 하나다.
+
+**해석:** can_write 조건이 없으면 38행으로 더 많고, can_write 조건이 있으면 24행으로 더 적어진다. 빠진 14행은 전부 간호사 N 이고 진료 기록을 고칠수 있는 재직 직원은 전부 의사이다.
