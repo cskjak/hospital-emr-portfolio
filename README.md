@@ -1577,3 +1577,58 @@ ORDER BY ro.role_id;
 `WHERE`는 세기 전에 줄을 지우고, `SUM(DECODE(...))`는 줄을 남긴 채 0을 적는다.
 
 **해석:** ①은 간호사 줄이 남고 고칠수있는 칸은 0 이다. ②는 4줄이고 간호사 줄이 없다. 간호사 4줄은 can_write가 전부 N이라서 웨어절에서 지워졌기 때문이다.
+
+## 39. 아무도 못 고치는 메뉴 (LEFT JOIN 조건 · ON vs WHERE)
+
+32번(LEFT JOIN + IS NULL)에 37번 조건 `rm.can_write = 'Y'`를 붙여, 고칠 수 있는 역할이 하나도 없는 메뉴를 찾는다. 같은 조건을 `WHERE`에 둘 때와 `ON`에 둘 때를 비교한다.
+
+### ① 조건을 WHERE에
+
+```sql
+SELECT m.menu_id, m.menu_name
+FROM menu m
+LEFT JOIN role_menu rm ON m.menu_id = rm.menu_id
+WHERE rm.can_write = 'Y'
+  AND rm.role_id IS NULL;
+```
+
+결과: **0줄** (선택된 레코드가 없습니다)
+
+### ② 조건을 ON에
+
+```sql
+SELECT m.menu_id, m.menu_name
+FROM menu m
+LEFT JOIN role_menu rm ON m.menu_id = rm.menu_id
+                      AND rm.can_write = 'Y'
+WHERE rm.role_id IS NULL
+ORDER BY m.menu_id;
+```
+
+| menu_id | menu_name |
+|---:|---|
+| 100 | 외래 |
+| 104 | 외래 일정 |
+| 200 | 원무 |
+| 300 | 약제 |
+| 400 | 통계 |
+| 401 | 접수 통계 |
+| 402 | 수납 통계 |
+| 403 | 대기 시간 통계 |
+| 500 | 시스템 관리 |
+| 503 | SMS 발송내역 |
+| 504 | 공지사항 관리 |
+
+### 104 외래 일정 따라가기
+
+`role_menu`에서 104는 의사·간호사·원무 3줄이고, `can_write`는 전부 `N`이다.
+
+| 순서 | ① WHERE | ② ON |
+|---|---|---|
+| JOIN | 104 3줄 (전부 `N`) | `Y`인 짝이 없음 → 빈칸(NULL) 짝 1줄 |
+| WHERE | `can_write = 'Y'`에서 3줄 다 지워짐 | `role_id IS NULL`에 걸려 남음 |
+| 결과 | 104 없음 | 104 있음 |
+
+`Y`인 줄을 찾으면 그 줄의 `role_id`는 항상 채워져 있다. 그래서 ①은 어떤 데이터에서도 0줄이다.
+
+**해석:** 웨어절에 Y 를 두면 0 줄 on 에 두면 11줄이 나왔다. 104 외래 일정은 on 절에 둬야 결과에 나온다.
