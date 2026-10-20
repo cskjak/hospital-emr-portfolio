@@ -5,7 +5,8 @@
 > ⚠️ **모든 데이터는 무작위로 만든 가상 데이터입니다.** 실제 병원·환자·의료진과 무관합니다.
 > 기간: **2026-01-02 ~ 2026-06-30 (6개월)** · 생성: `scripts/generate_data.ps1` (시드 고정 → 다시 돌려도 같은 값)
 > 운영 기록: [INCIDENTS.md](INCIDENTS.md) — 이 DB를 쓰면서 실제로 겪은 장애와 복구 (alert log 기준)
-> 백업·복구 실습: [BACKUP.md](BACKUP.md) — 휴지통 · Data Pump · RMAN
+> 백업·복구 실습: [BACKUP.md](BACKUP.md) — 휴지통 · Data Pump · RMAN · ARCHIVELOG
+> DB 권한 실습: [PRIVILEGES.md](PRIVILEGES.md) — 읽기 전용 계정 · GRANT · ROLE · REVOKE
 
 ---
 
