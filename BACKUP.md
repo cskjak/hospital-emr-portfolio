@@ -241,14 +241,18 @@ SQL> SELECT group#, sequence#, status FROM v$log;
 
 파일 이름의 `27`과 방금까지 쓰던 로그(GROUP 3)의 SEQUENCE# 27이 같다.
 
-### 한글 `ARCHIVE LOG LIST`의 순서 번호가 v$log와 다르다
+### `ARCHIVE LOG LIST`의 순서 번호가 v$log와 다르다
 
-| 칸 | `ARCHIVE LOG LIST` | v$log |
-|---|---:|---:|
-| 현재 로그 순서 | 26 | 28 (CURRENT) |
-| 가장 오래된 온라인 로그 순서 | 28 | 26 |
+| 시점 | 칸 | `ARCHIVE LOG LIST` | v$log 실제 |
+|---|---|---:|---:|
+| SWITCH 직후 (v$log 26 · 27 · 28) | 가장 오래된 | 28 | 26 |
+| | 아카이브할 다음 | 27 | 28 |
+| | 현재 | 26 | 28 (CURRENT) |
+| E 정리 뒤 (v$log 28 · 29 · 30) | 가장 오래된 | 30 | 28 |
+| | 아카이브할 다음 | 30 | 30 |
+| | 현재 | 29 | 30 (CURRENT) |
 
-두 칸의 값이 서로 바뀌어 보인다. 순서 번호는 v$log로 확인한다. 원인(한글 메시지 문제인지)은 확인하지 않았다.
+처음엔 한글 메시지 문제로 의심했다. 그래서 `set NLS_LANG=AMERICAN_AMERICA.AL32UTF8`로 영어 창을 띄워 같은 순간에 비교했는데, 영어(`Oldest 30 · Next 30 · Current 29`)도 한글과 숫자가 같았다. 언어 문제는 아니다. 원인은 확인하지 못했다. 순서 번호는 원본인 v$log로 확인한다.
 
 **해석:** 아카이브 모드로 바꾸고 SWITCH LOGFILE을 하니 파일이 0개에서 1개로 생겼다.
 
