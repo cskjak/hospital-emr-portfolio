@@ -1819,3 +1819,70 @@ SELECT /*+ INDEX(reception idx_reception_patient) */ * FROM reception WHERE pati
 41번에서 본 것처럼 한 환자의 줄도 블록 여러 개에 흩어져 있어서, 인덱스 경로는 줄마다 테이블 블록을 찾아간다. 그래서 찾는 줄이 많을수록 Cost가 커진다. FULL은 58블록을 다 읽으므로 줄 수와 상관없이 17이다. Oracle은 Cost가 작은 쪽을 고른다.
 
 **해석:** 인덱스 경로는 찾는 줄이 많을수록 Cost가 커지고, FULL은 찾는 줄 수와 상관없이 Cost가 17이다. 그래서 환자 10명(19줄)만 찾아도 Oracle은 FULL을 골랐다.
+
+## 43. 묶은 결과를 다시 묶기 (인라인 뷰)
+
+환자 한 명당 접수 건수를 구한 뒤, 그 건수별로 환자가 몇 명인지 다시 센다. 첫 번째 묶음 결과를 괄호로 감싸 `FROM` 자리에 넣는다(인라인 뷰).
+
+### ① 환자 한 명당 접수 건수 (41번 환자 3명)
+
+```sql
+SELECT patient_id, COUNT(*) AS cnt
+FROM reception
+WHERE patient_id IN (10000101, 10000102, 10000103)
+GROUP BY patient_id;
+```
+
+| patient_id | cnt | 41번 표의 블록 개수 |
+|---:|---:|---:|
+| 10000101 | 2 | 2 |
+| 10000102 | 3 | 3 |
+| 10000103 | 3 | 3 |
+
+### ② 건수별 환자 수 (①에서 `WHERE`를 빼고 `FROM` 자리에 넣음)
+
+```sql
+SELECT cnt, COUNT(*) AS 환자수
+FROM (SELECT patient_id, COUNT(*) AS cnt
+      FROM reception
+      GROUP BY patient_id)
+GROUP BY cnt
+ORDER BY cnt;
+```
+
+| cnt | 환자수 | cnt × 환자수 |
+|---:|---:|---:|
+| 1 | 2,241 | 2,241 |
+| 2 | 1,348 | 2,696 |
+| 3 | 797 | 2,391 |
+| 4 | 329 | 1,316 |
+| 5 | 114 | 570 |
+| 6 | 21 | 126 |
+| 7 | 2 | 14 |
+| 8 | 1 | 8 |
+
+바깥 `SELECT`에서 집계함수로 감싸지 않은 컬럼이 `cnt`라서 `GROUP BY cnt`다.
+
+### ③ 검산 (②를 한 번 더 감쌈)
+
+```sql
+SELECT SUM(환자수), SUM(cnt * 환자수)
+FROM (SELECT cnt, COUNT(*) AS 환자수
+      FROM (SELECT patient_id, COUNT(*) AS cnt
+            FROM reception
+            GROUP BY patient_id)
+      GROUP BY cnt);
+```
+
+| | 결과 | 원본 |
+|---|---:|---|
+| `SUM(환자수)` | 4,853 | 환자번호 10000001 ~ 10004853 |
+| `SUM(cnt * 환자수)` | 9,362 | `SELECT COUNT(*) FROM reception` |
+
+| 쿼리 | 괄호 겹 수 | 묶는 기준 | 결과 줄 수 |
+|---|---:|---|---:|
+| ① | 0 | 환자 | 환자마다 1줄 |
+| ② | 1 | 건수(cnt) | 8 |
+| ③ | 2 | 없음 (전체 합계) | 1 |
+
+**해석:** 접수 1건인 환자가 2241명으로 가장 많고 8건은 1명이다. 검산하면 환자 4853명, 접수 9362줄로 원본과 같다.
