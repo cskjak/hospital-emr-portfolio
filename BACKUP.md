@@ -1,12 +1,13 @@
 # 백업·복구 실습
 
-이 포트폴리오 DB(Oracle 26ai Free, NOARCHIVELOG 모드)에서 백업과 복구를 직접 해 본 기록이다. 원본 테이블은 건드리지 않고 복사본으로 연습한다.
+이 포트폴리오 DB(Oracle 26ai Free)에서 백업과 복구를 직접 해 본 기록이다. 원본 테이블은 건드리지 않고 복사본으로 연습한다. A~C는 NOARCHIVELOG 모드에서 했고, D에서 ARCHIVELOG 모드로 바꿨다.
 
 | 순서 | 종류 | 도구 | 상태 |
 |---|---|---|---|
 | A | 지운 테이블 되살리기 | 휴지통 (`FLASHBACK TABLE`) | ✅ |
 | B | 논리 백업 | Data Pump (`expdp` / `impdp`) | ✅ |
 | C | 물리 백업 | RMAN | ✅ |
+| D | ARCHIVELOG 전환 | `ALTER DATABASE ARCHIVELOG` | ✅ |
 
 ## A. 지운 테이블 되살리기 (휴지통)
 
@@ -165,3 +166,87 @@ RMAN> RESTORE DATABASE VALIDATE;
 | 되살리면 백업한 시점으로만 돌아가고, 그 뒤 변경은 사라진다 | 개념 · 직접 확인은 안 함 |
 
 **해석:** DB가 열려 있으면 오라클 자체에서 백업 시도조차 차단된다. 그래서 마운트하고 백업을 시도하니 정상적으로 가능했다. 데이터 파일 12개(3.8GB)가 백업 조각 3개(2.9GB)로 줄었다. VALIDATE로 검사만 해서 건드린 건 없다.
+
+## D. ARCHIVELOG 전환
+
+리두 로그(변경 기록)는 3개 × 200MB를 돌아가며 쓴다. NOARCHIVELOG에서는 다 찬 로그를 그대로 덮어쓰고, ARCHIVELOG에서는 덮어쓰기 전에 아카이브 로그 파일로 복사해 둔다.
+
+### 1. 전환 전 확인 (sqlplus · sysdba)
+
+```
+SQL> ARCHIVE LOG LIST
+데이터베이스 로그 모드              아카이브 모드가 아님
+아카이브 대상            C:\app\<사용자>\product\26ai\dbhomeFree\RDBMS
+
+SQL> SHOW PARAMETER log_archive_dest_1        -- 비어 있음
+SQL> SHOW PARAMETER db_recovery_file_dest     -- 비어 있음 (FRA 없음)
+SQL> SELECT group#, bytes/1024/1024 AS mb, status FROM v$log;   -- 3개 × 200MB
+```
+
+위치를 따로 정하지 않으면 Oracle 프로그램 폴더(`RDBMS`)에 쌓인다. 프로그램 파일과 섞이지 않게 전용 폴더를 만든다. `X:`는 꺼내 두는 드라이브라 쓰지 않는다.
+
+### 2. 위치 지정 → 전환
+
+```sql
+HOST mkdir C:\oracle_archive
+ALTER SYSTEM SET log_archive_dest_1='LOCATION=C:\oracle_archive' SCOPE=BOTH;
+
+SHUTDOWN IMMEDIATE
+STARTUP MOUNT
+ALTER DATABASE ARCHIVELOG;     -- 로그 모드는 MOUNT 상태에서만 바꿀 수 있다
+ALTER DATABASE OPEN;
+SELECT name, open_mode FROM v$pdbs;   -- FREEPDB1 READ WRITE
+```
+
+| 칸 | 전환 전 | 전환 후 |
+|---|---|---|
+| 데이터베이스 로그 모드 | 아카이브 모드가 아님 | 아카이브 모드 |
+| 자동 아카이브 | 사용 안함 | 사용 |
+| 아카이브 대상 | `...\dbhomeFree\RDBMS` | `C:\oracle_archive` |
+
+### 3. 아카이브 파일이 생기는지 확인
+
+```sql
+HOST dir C:\oracle_archive     -- 0 File(s)
+ALTER SYSTEM SWITCH LOGFILE;   -- 다 찬 것으로 치고 다음 리두 로그로 넘김
+HOST dir C:\oracle_archive
+```
+
+| 칸 | SWITCH 전 | SWITCH 후 |
+|---|---:|---:|
+| 파일 수 | 0 | 1 (`ARC0000000027_1244943258.0001`) |
+| 파일 크기 | | 118,377,984 bytes |
+| C: 여유 공간 | 44,346,044,416 | 44,227,665,920 |
+
+여유 공간이 줄어든 양(118,378,496)이 파일 크기와 거의 같다. 200MB가 다 차기 전에 넘겨서 그때까지 쓴 만큼만 복사됐다.
+
+### 파일 이름 규칙
+
+`SHOW PARAMETER log_archive_format` → `ARC%S_%R.%T`
+
+| 규칙 | 실제 | 뜻 |
+|---|---|---|
+| `%S` | `0000000027` | 로그 순서 번호 |
+| `%R` | `1244943258` | RESETLOGS ID |
+| `%T` | `0001` | 스레드 번호 |
+
+```
+SQL> SELECT group#, sequence#, status FROM v$log;
+    GROUP#  SEQUENCE# STATUS
+         1         28 CURRENT
+         2         26 INACTIVE
+         3         27 ACTIVE
+```
+
+파일 이름의 `27`과 방금까지 쓰던 로그(GROUP 3)의 SEQUENCE# 27이 같다.
+
+### 한글 `ARCHIVE LOG LIST`의 순서 번호가 v$log와 다르다
+
+| 칸 | `ARCHIVE LOG LIST` | v$log |
+|---|---:|---:|
+| 현재 로그 순서 | 26 | 28 (CURRENT) |
+| 가장 오래된 온라인 로그 순서 | 28 | 26 |
+
+두 칸의 값이 서로 바뀌어 보인다. 순서 번호는 v$log로 확인한다. 원인(한글 메시지 문제인지)은 확인하지 않았다.
+
+**해석:** 아카이브 모드로 바꾸고 SWITCH LOGFILE을 하니 파일이 0개에서 1개로 생겼다.
