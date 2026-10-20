@@ -8,6 +8,7 @@
 | B | 논리 백업 | Data Pump (`expdp` / `impdp`) | ✅ |
 | C | 물리 백업 | RMAN | ✅ |
 | D | ARCHIVELOG 전환 | `ALTER DATABASE ARCHIVELOG` | ✅ |
+| E | 열린 채 백업 + 아카이브 로그 정리 | RMAN | ✅ |
 
 ## A. 지운 테이블 되살리기 (휴지통)
 
@@ -250,3 +251,56 @@ SQL> SELECT group#, sequence#, status FROM v$log;
 두 칸의 값이 서로 바뀌어 보인다. 순서 번호는 v$log로 확인한다. 원인(한글 메시지 문제인지)은 확인하지 않았다.
 
 **해석:** 아카이브 모드로 바꾸고 SWITCH LOGFILE을 하니 파일이 0개에서 1개로 생겼다.
+
+## E. 열린 채 백업 + 아카이브 로그 정리 (RMAN)
+
+### 1. C와 같은 명령을 DB가 열린 채로 다시 실행
+
+```
+RMAN> BACKUP DATABASE FORMAT 'C:\oracle_backup\%U';
+```
+
+| | C (NOARCHIVELOG) | E (ARCHIVELOG) |
+|---|---|---|
+| DB 상태 | 열림 | 열림 |
+| 결과 | RMAN-06149 거부 | 조각 3개 + 컨트롤 파일 자동 백업 |
+| `LIST BACKUP SUMMARY` 키 | 1~4 | 5~8 |
+| 조각별 걸린 시간 | 15 · 7 · 15초 | 15 · 7 · 15초 |
+
+C의 에러 문구가 "**NOARCHIVELOG 모드에서** BACKUP DATABASE를 수행할 수 없습니다"였다. 거부된 이유는 DB가 열려 있어서가 아니라 로그 모드였다. ARCHIVELOG에서는 백업하는 동안 바뀐 내용이 아카이브 로그로 남는다.
+
+### 2. 아카이브 로그 백업
+
+```
+RMAN> LIST ARCHIVELOG ALL;                                   -- 시퀀스 27 하나
+RMAN> BACKUP ARCHIVELOG ALL FORMAT 'C:\oracle_backup\%U';
+RMAN> LIST BACKUP OF ARCHIVELOG ALL;
+```
+
+`BACKUP ARCHIVELOG ALL`은 시작할 때 지금 쓰던 리두 로그부터 아카이브한다(`현재 로그가 아카이브됨`). 처음에 `%U`를 `$U`로 잘못 쳐서 ORA-09314(논리 이름 변환 오류)로 실패했고, 그때도 로그가 하나 아카이브돼서 백업 대상은 3개가 됐다.
+
+| Seq | Low SCN (시작) | 다음 SCN (끝) |
+|---|---:|---:|
+| 27 | 16541080 | 16605067 |
+| 28 | 16605067 | 16608767 |
+| 29 | 16608767 | 16608870 |
+
+백업 집합 9 (121.54MB)에 3개가 모두 들어갔다. 한 파일의 끝 SCN이 다음 파일의 시작 SCN과 같아서 빠진 변경 기록이 없다. 28은 1번의 데이터베이스 백업(19:02) 시간을 포함한다. 열린 채로 한 백업을 되살리려면 이런 아카이브 로그가 같이 있어야 한다(Oracle 문서 기준 · 복구는 직접 해 보지 않음).
+
+### 3. 백업된 것만 삭제
+
+```
+RMAN> DELETE ARCHIVELOG ALL BACKED UP 1 TIMES TO DEVICE TYPE DISK;
+```
+
+지울 목록(27 · 28 · 29)을 보여 주고 `YES`를 받은 뒤 `3 객체를 삭제함`. 백업 확인(`LIST BACKUP OF ARCHIVELOG ALL`) 전에 지우지 않는다. 2번의 첫 시도가 실패했을 때는 이 목록이 비어 있었다(`사양이 저장소의 백업과 일치하지 않습니다`).
+
+### 4. 확인
+
+| 명령 | 결과 |
+|---|---|
+| `LIST ARCHIVELOG ALL` | 없음 (`사양이 저장소의 아카이브된 로그와 일치하지 않습니다`) |
+| `HOST 'dir C:\oracle_archive'` | 0 File(s) |
+| `LIST BACKUP OF ARCHIVELOG ALL` | 백업 집합 9 그대로 (27 · 28 · 29) |
+
+**해석:** NOARCHIVELOG에서는 DB가 열린 채로 백업이 거부됐는데, ARCHIVELOG로 바꾸니 같은 명령으로 성공했다. 백업은 정상적으로 남아있고 RMAN 기록상 원본은 삭제 됐고 실제 폴더에서도 0 파일로 삭제된게 확인이 됐다.
