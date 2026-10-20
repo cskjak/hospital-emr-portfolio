@@ -6,8 +6,9 @@
 |---|---|---|---|
 | 1 | 부팅 뒤 DB가 MOUNTED에서 멈춤 | X:를 꺼낸 채 부팅 | 원인 확정 · 재발 방지 미정 |
 | 2 | 인스턴스가 꺼져 있음 (ORA-01034) | DB가 켜진 채 X:를 꺼냄 | 원인 확정 · 순서로 막음 |
+| 3 | 전체 DB는 열렸는데 FREEPDB1만 MOUNTED | 정상 종료 뒤 X:를 꺼낸 채 재부팅 | 원인 확정 · 1번과 다른 이유는 추정 |
 
-두 장애 모두 X: 꺼내기에서 시작한다. 꺼내고 재부팅하면 1번, DB가 켜진 채 꺼내면 2번이다.
+세 장애 모두 X: 꺼내기에서 시작한다. 꺼내고 재부팅하면 1번(정상 종료 뒤였으면 3번), DB가 켜진 채 꺼내면 2번이다.
 
 ## 1. 부팅 뒤 MOUNTED에서 멈춤
 
@@ -134,3 +135,52 @@ SHOW PDBS                        -- FREEPDB1 READ WRITE
 | 끌 때 | `SHUTDOWN IMMEDIATE` | X: 꺼내기 |
 
 **배운 점:** 오라클이 켜져 있는 동안 X:는 항상 붙어 있어야 한다. 오라클을 실행하기 전에 반드시 X:를 붙이고 암호화를 해제한 다음 실행해야 마운트 상태에서 멈추지 않고 정상 작동한다. X:를 꺼내기 전에는 오라클 종료를 먼저 해야 한다.
+
+## 3. 전체 DB는 열렸는데 FREEPDB1만 MOUNTED
+
+### 증상
+- `emr` 접속이 `ORA-01109`(데이터베이스가 개방되지 않음)로 실패한다.
+- `SELECT status FROM v$instance;` → `OPEN` (1번과 다르다)
+- `SELECT name, open_mode FROM v$pdbs;` → `FREEPDB1  MOUNTED`
+
+### 증거 (alert log + Windows 기록)
+
+| 시각 (10/20) | 일어난 일 | 근거 |
+|---|---|---|
+| 03:06:57 | `SHUTDOWN IMMEDIATE` 완료 | alert log `Instance shutdown complete` |
+| 03:07:43 | X: 꺼냄 | `VHDMP-Operational` ID 2 |
+| 05:24:07 | 시작 메뉴에서 다시 시작 | `System` ID 1074 (`다시 시작`) |
+| 05:25:12 | 서비스가 인스턴스 자동 시작 | alert log `Starting ORACLE instance` |
+| 05:25:29 | FREEPDB1을 열다가 ORA-01157 (`X:\ORADATA\HOSPITAL01.DBF`) → 전체 DB는 `Completed: alter database open` | alert log |
+| 18:15:06 | X: 붙임 | `VHDMP-Operational` ID 1 |
+| 18:22:16 | `ALTER PLUGGABLE DATABASE FREEPDB1 OPEN` → READ WRITE | alert log |
+
+### 원인
+1번과 같다. X:가 없는 상태에서 재부팅되어 서비스가 인스턴스를 자동으로 시작했고, X:의 데이터 파일을 찾지 못했다. 끌 때 순서(`SHUTDOWN IMMEDIATE` → X: 꺼내기)는 지켰다.
+
+### 1번과 결과가 다른 이유
+
+9/26 ~ 10/20 alert log에서 자동 시작이 ORA-01157로 실패한 기록을, 그 직전에 DB가 어떻게 끝났는지와 나란히 놓았다.
+
+| 자동 시작 직전 DB가 끝난 방식 | 결과 | 횟수 |
+|---|---|---|
+| 종료 기록 없음 · CKPT 강제 종료 | 전체 DB가 MOUNTED (`ORA-1157 signalled during: alter database open`) | 1번 장애 전부 |
+| `SHUTDOWN IMMEDIATE` 정상 종료 | 전체 DB는 OPEN, FREEPDB1만 MOUNTED | 1번 (10/20) |
+
+- **확정:** 정상 종료 뒤의 자동 시작은 10/20이 처음이고, 결과가 다른 것도 이때 한 번뿐이다.
+- **추정 (사례 1번):** 비정상으로 끝난 DB는 다음에 열 때 모든 데이터 파일을 맞추는 복구를 먼저 하므로 X: 파일이 없으면 전체가 멈춘다. 정상 종료였으면 그 복구가 필요 없어 전체 DB는 열리고, X: 파일을 쓰는 FREEPDB1만 못 연다.
+
+### 복구
+```sql
+-- 먼저 X: 드라이브를 붙인다 (vhdx 열기 → BitLocker 비밀번호)
+sqlplus / as sysdba
+SELECT status FROM v$instance;                  -- OPEN
+SELECT name, open_mode FROM v$pdbs;             -- FREEPDB1 MOUNTED
+ALTER PLUGGABLE DATABASE FREEPDB1 OPEN;
+SELECT name, open_mode FROM v$pdbs;             -- FREEPDB1 READ WRITE
+```
+
+### 재발 방지
+1번과 같다(미정). 서비스가 자동 시작인 한, X:를 꺼낸 채 재부팅하면 다시 난다.
+
+**배운 점:** 끌 때 순서(SHUTDOWN → X: 꺼내기)를 지켜도, X:를 꺼낸 채로 PC를 재부팅 하면 Oracle이 자동으로 켜지면서 FREEPDB1이 멈춘다. 그래서 `v$instance`가 OPEN이어도 `v$pdbs` 까지 확인해야 한다.
