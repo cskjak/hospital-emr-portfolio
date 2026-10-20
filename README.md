@@ -1755,3 +1755,67 @@ CREATE INDEX idx_reception_patient ON reception(patient_id);
 9,362줄은 작은 테이블이라 Time은 둘 다 00:00:01이고, 차이는 Cost에서만 보인다. Rows 2는 Oracle의 예상값(환자 1명당 평균 1.9건)이고 실제는 3줄이다.
 
 **해석:** 인덱스가 없으면 테이블 58블록 전부를 읽고 Cost는 17, 인덱스를 만들면 인덱스에서 3줄, 테이블에서 블록 3개만 읽고 Cost는 3이다.
+
+## 42. 인덱스가 있어도 안 쓰는 경우 (범위 조건 · 힌트로 강제)
+
+41번 인덱스(`idx_reception_patient`)를 그대로 두고, 조건을 환자 1명에서 환자 범위로 넓혀 실행계획을 본다. `reception`의 `patient_id`는 10000001 ~ 10004853이다.
+
+### ① 환자 10명 (10000001 ~ 10000010)
+
+```sql
+EXPLAIN PLAN FOR
+SELECT * FROM reception WHERE patient_id BETWEEN 10000001 AND 10000010;
+
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
+```
+
+```
+| Id  | Operation         | Name      | Rows  | Bytes | Cost (%CPU)|
+|   0 | SELECT STATEMENT  |           |    19 |   741 |    17   (0)|
+|*  1 |  TABLE ACCESS FULL| RECEPTION |    19 |   741 |    17   (0)|
+
+   1 - filter("PATIENT_ID"<=10000010 AND "PATIENT_ID">=10000001)
+```
+
+인덱스가 있는데도 `TABLE ACCESS FULL`이다. 실제 줄 수는 `COUNT(*)`로 12줄이다.
+
+### ② 환자 전부 (10000001 ~ 10004853)
+
+```
+| Id  | Operation         | Name      | Rows  | Bytes | Cost (%CPU)|
+|   0 | SELECT STATEMENT  |           |  9362 |   356K|    17   (0)|
+|*  1 |  TABLE ACCESS FULL| RECEPTION |  9362 |   356K|    17   (0)|
+```
+
+9,362줄 전부라 역시 `TABLE ACCESS FULL`, Cost는 ①과 같은 17이다.
+
+### ③ 힌트로 인덱스를 강제 (①과 같은 범위)
+
+```sql
+EXPLAIN PLAN FOR
+SELECT /*+ INDEX(reception idx_reception_patient) */ * FROM reception WHERE patient_id BETWEEN 10000001 AND 10000010;
+```
+
+```
+| Id  | Operation                           | Name                  | Rows  | Bytes | Cost (%CPU)|
+|   0 | SELECT STATEMENT                    |                       |    19 |   741 |    20   (0)|
+|   1 |  TABLE ACCESS BY INDEX ROWID BATCHED| RECEPTION             |    19 |   741 |    20   (0)|
+|*  2 |   INDEX RANGE SCAN                  | IDX_RECEPTION_PATIENT |    19 |       |     2   (0)|
+
+   2 - access("PATIENT_ID">=10000001 AND "PATIENT_ID"<=10000010)
+```
+
+`/*+ INDEX(...) */`는 "이 인덱스를 써라"라는 힌트다. 인덱스 경로의 Cost는 20(인덱스 2 + 테이블 18)으로 FULL 17보다 크다.
+
+### 비교
+
+| | 41번 (환자 1명) | ① 환자 10명 | ② 환자 전부 | ③ ①을 인덱스로 강제 |
+|---|---:|---:|---:|---:|
+| Rows (예상) | 2 | 19 | 9,362 | 19 |
+| 실제 줄 수 | 3 | 12 | 9,362 | 12 |
+| 실행계획 | INDEX RANGE SCAN | FULL | FULL | INDEX RANGE SCAN |
+| Cost | 3 | 17 | 17 | 20 |
+
+41번에서 본 것처럼 한 환자의 줄도 블록 여러 개에 흩어져 있어서, 인덱스 경로는 줄마다 테이블 블록을 찾아간다. 그래서 찾는 줄이 많을수록 Cost가 커진다. FULL은 58블록을 다 읽으므로 줄 수와 상관없이 17이다. Oracle은 Cost가 작은 쪽을 고른다.
+
+**해석:** 인덱스 경로는 찾는 줄이 많을수록 Cost가 커지고, FULL은 찾는 줄 수와 상관없이 Cost가 17이다. 그래서 환자 10명(19줄)만 찾아도 Oracle은 FULL을 골랐다.
