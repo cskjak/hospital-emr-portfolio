@@ -9,6 +9,7 @@
 | C | 물리 백업 | RMAN | ✅ |
 | D | ARCHIVELOG 전환 | `ALTER DATABASE ARCHIVELOG` | ✅ |
 | E | 열린 채 백업 + 아카이브 로그 정리 | RMAN | ✅ |
+| F | 데이터 파일을 지우고 되살리기 | RMAN (`RESTORE` · `RECOVER`) | ✅ |
 
 ## A. 지운 테이블 되살리기 (휴지통)
 
@@ -308,3 +309,160 @@ RMAN> DELETE ARCHIVELOG ALL BACKED UP 1 TIMES TO DEVICE TYPE DISK;
 | `LIST BACKUP OF ARCHIVELOG ALL` | 백업 집합 9 그대로 (27 · 28 · 29) |
 
 **해석:** NOARCHIVELOG에서는 DB가 열린 채로 백업이 거부됐는데, ARCHIVELOG로 바꾸니 같은 명령으로 성공했다. 백업은 정상적으로 남아있고 RMAN 기록상 원본은 삭제 됐고 실제 폴더에서도 0 파일로 삭제된게 확인이 됐다.
+
+## F. 데이터 파일을 지우고 되살리기 (RMAN RESTORE · RECOVER)
+
+C~E에서는 백업을 만들고 `VALIDATE`로 읽어 보기만 했다. 여기서는 데이터 파일을 실제로 지우고, RMAN으로 되살렸을 때 백업 **뒤에** 넣은 줄까지 돌아오는지 확인한다. 원본 데이터 파일(`X:\ORADATA\HOSPITAL01.DBF`)을 지울 수는 없으므로, 실습용 테이블스페이스를 따로 만들어 그 파일만 지웠다.
+
+| 단어 | 뜻 |
+|---|---|
+| 테이블스페이스 (tablespace) | 테이블이 들어가는 저장 구역. 실제 파일(데이터 파일)을 하나 이상 가진다 |
+| OFFLINE / ONLINE | 테이블스페이스를 잠시 쓰지 않는 상태로 내리기 / 다시 쓰는 상태로 올리기 |
+| RESTORE (리스토어) | 백업에서 파일을 원래 자리에 다시 갖다 놓기. 내용은 백업한 시점으로 돌아간다 |
+| RECOVER (리커버) | 갖다 놓은 파일에 백업 뒤의 변경 기록(리두 로그 · 아카이브 로그)을 다시 적용하기 |
+
+### 1. 실습용 테이블스페이스 (sqlplus · sysdba)
+
+```sql
+ALTER SESSION SET CONTAINER = FREEPDB1;
+HOST mkdir C:\oracle_test
+CREATE TABLESPACE rman_test DATAFILE 'C:\oracle_test\rman_test01.dbf' SIZE 50M;
+ALTER USER emr QUOTA UNLIMITED ON rman_test;
+CREATE TABLE emr.dl_test (id NUMBER, val NUMBER) TABLESPACE rman_test;
+INSERT INTO emr.dl_test VALUES (1, 10);
+INSERT INTO emr.dl_test VALUES (2, 200);
+COMMIT;
+SELECT file_id, file_name FROM dba_data_files WHERE tablespace_name = 'RMAN_TEST';   -- 18 · C:\ORACLE_TEST\RMAN_TEST01.DBF
+```
+
+`dl_test`는 [LOCKS.md](LOCKS.md) B의 데드락 실습에도 썼다(바꾼 값은 ROLLBACK으로 되돌림). 따로 적지 않았는데 `rman_test`는 BIGFILE(파일 하나짜리 테이블스페이스)로 만들어졌다. 26ai의 기본값이다.
+
+### 2. 테이블스페이스 하나만 백업 (RMAN · 23:10)
+
+```
+RMAN> BACKUP TABLESPACE FREEPDB1:RMAN_TEST FORMAT 'C:\oracle_backup\%U';
+RMAN> LIST BACKUP OF TABLESPACE FREEPDB1:RMAN_TEST;
+```
+
+| 칸 | 값 |
+|---|---|
+| 백업 집합 (BS 키) | 12 |
+| 조각 | `C:\ORACLE_BACKUP\0D55Q43C_13_1_1` |
+| 크기 | 6.14MB (데이터 파일은 50MB · C와 같이 빈 블록은 건너뜀) |
+| Ckp SCN | 16777383 |
+| 담긴 내용 | dl_test 2줄 (1 · 2) |
+
+RMAN은 CDB 맨 위(root)에 접속하므로, PDB 안의 테이블스페이스는 앞에 `FREEPDB1:`을 붙인다. 같은 이유로 RMAN 창에서 친 `INSERT INTO emr.dl_test ...`는 `ORA-00942 "EMR"."DL_TEST"이(가) 존재하지 않습니다`로, `ALTER TABLESPACE rman_test ONLINE`은 `ORA-00959 테이블스페이스 'RMAN_TEST'이(가) 존재하지 않습니다`로 실패했다. 둘 다 FREEPDB1에 접속한 sqlplus 관리 창에서 다시 쳤다.
+
+### 3. 백업 뒤에 줄 넣기 (sqlplus · 23:37~)
+
+```sql
+INSERT INTO emr.dl_test VALUES (4, 400);
+COMMIT;
+INSERT INTO emr.dl_test VALUES (3, 300);
+COMMIT;
+INSERT INTO emr.dl_test VALUES (3, 300);
+COMMIT;
+SELECT * FROM emr.dl_test ORDER BY id;   -- 1 · 2 · 3 · 3 · 4 → 5줄
+```
+
+3번 줄은 같은 명령을 두 번 쳐서 두 개가 들어갔다. 백업 뒤에 넣은 줄이 몇 개든 모두 돌아오는지를 보는 실험이라 그대로 두었다. 이제 백업에는 2줄, 테이블에는 5줄이 있다.
+
+### 4. 지우기 전 확인
+
+| 확인 | 명령 | 결과 |
+|---|---|---|
+| 이 파일에 무엇이 들어 있나 | `SELECT owner, segment_name FROM dba_segments WHERE tablespace_name = 'RMAN_TEST';` | EMR · DL_TEST 한 줄 |
+| 지울 파일이 정확히 이것인가 | `HOST dir C:\oracle_test` | RMAN_TEST01.DBF 하나 (52,436,992바이트) |
+| 이 테이블을 쓰는 emr 세션이 남았나 | `SELECT sid, status FROM v$session WHERE username = 'EMR';` | 없음 |
+| 백업을 읽을 수 있나 | `RESTORE TABLESPACE FREEPDB1:RMAN_TEST VALIDATE;` | 검증 완료 · 데이터 파일 수정 시각은 23:10:36 그대로 |
+
+52,436,992바이트는 50MB(52,428,800)에 파일 머리 블록 하나(8,192)를 더한 크기다.
+
+### 5. 파일 삭제 → ORA-01157 (sqlplus · 23:41)
+
+```
+관리> ALTER TABLESPACE rman_test OFFLINE;
+테이블스페이스가 변경되었습니다.
+
+관리> HOST del C:\oracle_test\rman_test01.dbf
+관리> HOST dir C:\oracle_test
+               0 File(s)              0 bytes
+
+관리> ALTER TABLESPACE rman_test ONLINE;
+ORA-01157: 데이터 18 파일을 식별 또는 잠금 할 수 없습니다- DBWR 추적 파일을 보십시오
+ORA-01110: 18 데이터 파일: 'C:\ORACLE_TEST\RMAN_TEST01.DBF'
+```
+
+[INCIDENTS.md](INCIDENTS.md) 1번 · 3번과 같은 에러다. 그때는 X: 드라이브가 붙어 있지 않아 파일을 찾지 못했고, 이번에는 파일이 없어서 찾지 못했다. 이 동안 DB는 내려가지 않았고, 관리 창과 RMAN 창 모두 명령을 계속 받았다.
+
+### 6. RESTORE → ORA-01113 (23:43)
+
+```
+RMAN> RESTORE TABLESPACE FREEPDB1:RMAN_TEST;
+채널 ORA_DISK_1: 데이터 파일 00018을(를) C:\ORACLE_TEST\RMAN_TEST01.DBF(으)로 복원하는 중입니다.
+채널 ORA_DISK_1: 백업 조각 C:\ORACLE_BACKUP\0D55Q43C_13_1_1에서 읽는 중입니다.
+채널 ORA_DISK_1: 복원 완료, 경과 시간: 00:00:01
+```
+
+```
+관리> HOST dir C:\oracle_test
+2026-10-25  오후 11:43        52,436,992 RMAN_TEST01.DBF
+
+관리> ALTER TABLESPACE rman_test ONLINE;
+ORA-01113: 18 파일이 매체 복구되어야 합니다
+ORA-01110: 18 데이터 파일: 'C:\ORACLE_TEST\RMAN_TEST01.DBF'
+```
+
+백업 조각은 6.14MB였지만 돌아온 파일은 원래 크기(52,436,992바이트)다. 파일이 생기자 에러가 바뀌었다. ORA-01157(파일을 찾을 수 없음)이 ORA-01113(매체 복구가 필요함)이 됐다. 파일 내용이 백업 시점(SCN 16777383)에 머물러 있어서, 그 뒤 변경을 적용하기 전에는 열 수 없다는 뜻이다.
+
+### 7. RECOVER → ONLINE → 5줄 (23:46)
+
+```
+RMAN> RECOVER TABLESPACE FREEPDB1:RMAN_TEST;
+미디어 복구를 시작합니다
+매체 복구 완료, 경과 시간: 00:00:00
+```
+
+```
+관리> ALTER TABLESPACE rman_test ONLINE;
+테이블스페이스가 변경되었습니다.
+
+관리> SELECT * FROM emr.dl_test ORDER BY id;
+
+        ID        VAL
+---------- ----------
+         1         10
+         2        200
+         3        300
+         3        300
+         4        400
+```
+
+RECOVER 화면에는 아카이브 로그 이름이 나오지 않았다. `v$log`를 보면 그 까닭이 보인다.
+
+| 리두 로그 시퀀스 | 상태 | 시작 SCN | 시작 시각 |
+|---|---|---:|---|
+| 31 | INACTIVE · 아카이브됨 | 16666845 | 10-21 01:00 |
+| 32 | CURRENT · 아카이브 안 됨 | 16743041 | 10-25 22:16 |
+
+지금 쓰는 32번이 백업 SCN(16777383)보다 앞에서 시작했다. 백업 뒤 변경이 모두 아직 아카이브되지 않은 온라인 리두 로그 안에 있었으므로, 이번 복구에는 아카이브 로그가 쓰이지 않았다(화면과 `v$log` 기준).
+
+### 정리
+
+| 시점 | 데이터 파일 | `ONLINE` 결과 | dl_test |
+|---|---|---|---|
+| 23:10 백업 | 있음 | | 2줄 → 백업 집합 12 |
+| 23:37~ 줄 넣기 | 있음 | | 5줄 (백업 뒤 3줄) |
+| 23:41 삭제 | 없음 | ORA-01157 파일을 찾을 수 없음 | 볼 수 없음 |
+| 23:43 RESTORE | 있음 (백업 시점) | ORA-01113 매체 복구 필요 | 볼 수 없음 |
+| 23:46 RECOVER | 있음 (삭제 직전 시점) | 성공 | **5줄** |
+
+C · E에서 "직접 확인은 안 함"으로 남겨 둔 내용 가운데 이번에 확인한 것:
+
+| 앞에서 남겨 둔 것 | F에서 |
+|---|---|
+| (E) 열린 채로 한 백업을 되살리려면 아카이브 로그가 같이 있어야 한다 · 복구는 직접 해 보지 않음 | DB가 열린 채로 한 백업(23:10)을 RESTORE + RECOVER로 되살렸다. 이번에 필요한 변경은 온라인 리두 로그에 있었다 |
+| (C) 되살리면 백업한 시점으로만 돌아가고, 그 뒤 변경은 사라진다 (NOARCHIVELOG 기준) | ARCHIVELOG인 지금은 RESTORE만 하면 백업 시점, RECOVER까지 하면 백업 뒤 3줄도 돌아왔다. NOARCHIVELOG에서는 해 보지 않았다 |
+
+**해석:** 파일을 지운 뒤 `ONLINE`을 치니 파일이 없어서 찾을 수 없다는 에러(ORA-01157)가 확인됐다. RESTORE를 실행하자 백업에서 파일이 원래 자리에 다시 놓여 DBF가 다시 보였다. 파일은 다시 생겼지만 `ONLINE`을 치니 이번엔 ORA-01113(매체 복구 필요)이 나왔다. 그래서 RECOVER를 실행한 뒤 `ONLINE`으로 바꿔 보니 성공했고, 결과는 5줄이 나왔다. 백업 시점의 2줄에 RECOVER가 백업 뒤에 넣은 3줄을 다시 적용했기 때문이다.
