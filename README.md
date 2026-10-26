@@ -8,7 +8,7 @@
 > 백업·복구 실습: [BACKUP.md](BACKUP.md) — 휴지통 · Data Pump · RMAN · ARCHIVELOG · 데이터 파일 지우고 RESTORE · RECOVER
 > DB 권한 실습: [PRIVILEGES.md](PRIVILEGES.md) — 읽기 전용 계정 · GRANT · ROLE · REVOKE
 > 세션·락 실습: [LOCKS.md](LOCKS.md) — 두 세션이 같은 줄을 고칠 때 · `v$session`으로 막은 세션 찾기 · 데드락(ORA-00060)과 alert log · trace
-> 공간 실습: [SPACE.md](SPACE.md) — 사용률(%)의 분모는 무엇인가 · 아카이브 파일이 쌓이면 C: 남은 공간이 줄어든다
+> 공간 실습: [SPACE.md](SPACE.md) — 사용률(%)의 분모는 무엇인가 · 아카이브 파일이 쌓이면 C: 남은 공간이 줄어든다 · 같은 디스크에 백업하면 정리해도 공간이 거의 안 돌아온다
 
 ---
 
