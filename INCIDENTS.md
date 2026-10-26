@@ -7,8 +7,9 @@
 | 1 | 부팅 뒤 DB가 MOUNTED에서 멈춤 | X:를 꺼낸 채 부팅 | 원인 확정 · 재발 방지 미정 |
 | 2 | 인스턴스가 꺼져 있음 (ORA-01034) | DB가 켜진 채 X:를 꺼냄 | 원인 확정 · 순서로 막음 |
 | 3 | 전체 DB는 열렸는데 FREEPDB1만 MOUNTED | 정상 종료 뒤 X:를 꺼낸 채 재부팅 | 원인 확정 · 1번과 다른 이유는 추정 |
+| 4 | 부팅 뒤 인스턴스가 STARTED에서 멈춤 · `STARTUP`은 ORA-01081 | 자동 시작 도중 Oracle 내부 오류 (ORA-00600) | 내부 오류의 원인은 확인 못 함 · 1번 발생 |
 
-세 장애 모두 X: 꺼내기에서 시작한다. 꺼내고 재부팅하면 1번(정상 종료 뒤였으면 3번), DB가 켜진 채 꺼내면 2번이다.
+1~3번은 X: 꺼내기에서 시작한다. 꺼내고 재부팅하면 1번(정상 종료 뒤였으면 3번), DB가 켜진 채 꺼내면 2번이다. 4번은 3번과 같은 순서로 재부팅했지만, X:의 파일을 쓰기도 전인 시작 단계에서 Oracle 내부 오류로 멈췄다.
 
 ## 1. 부팅 뒤 MOUNTED에서 멈춤
 
@@ -184,3 +185,76 @@ SELECT name, open_mode FROM v$pdbs;             -- FREEPDB1 READ WRITE
 1번과 같다(미정). 서비스가 자동 시작인 한, X:를 꺼낸 채 재부팅하면 다시 난다.
 
 **배운 점:** 끌 때 순서(SHUTDOWN → X: 꺼내기)를 지켜도, X:를 꺼낸 채로 PC를 재부팅 하면 Oracle이 자동으로 켜지면서 FREEPDB1이 멈춘다. 그래서 `v$instance`가 OPEN이어도 `v$pdbs` 까지 확인해야 한다.
+
+## 4. 부팅 뒤 인스턴스가 STARTED에서 멈춤 (ORA-00600)
+
+### 증상
+- `sqlplus / as sysdba`는 접속됐다. 2번 때와 달리 휴지 인스턴스가 아니라, 떠 있는 인스턴스에 접속됐다.
+- `STARTUP` → `ORA-01081` (이미 떠 있는 인스턴스는 다시 시작할 수 없음)
+- `SELECT status FROM v$instance;` → `STARTED`
+- `SELECT open_mode FROM v$database;` → `ORA-01507` (데이터베이스가 마운트되지 않음)
+
+인스턴스가 거치는 네 상태 중 STARTED는 이 기록에서 처음 나온 상태다.
+
+| 상태 | 무엇까지 열렸나 | 이 기록에서 |
+|---|---|---|
+| 꺼짐 | 아무것도 없음 | 2번 (ORA-01034) |
+| STARTED | 메모리와 프로세스만 떠 있음. 파일은 하나도 안 열림 | **4번** |
+| MOUNTED | C:의 컨트롤 파일까지 | 1번 · 3번(FREEPDB1만) |
+| OPEN | 데이터 파일까지 | 정상 |
+
+### 증거 (alert log + Windows 기록)
+
+| 시각 (10/26) | 일어난 일 | 근거 |
+|---|---|---|
+| 00:58:58 | `SHUTDOWN IMMEDIATE` 완료 | alert log `Instance shutdown complete` |
+| 05:03:45 | X: 꺼냄 | `VHDMP-Operational` ID 2 |
+| 05:03:57 | 시작 메뉴에서 다시 시작 | `System` ID 1074 |
+| 05:04:57 | 서비스가 인스턴스 자동 시작 | alert log `Starting ORACLE instance` |
+| 05:04:58 | 시작 도중 ORA-07445 · ORA-00600 → 그 뒤로 아무 기록 없음 | alert log |
+| 19:41:10 | X: 붙임 | `VHDMP-Operational` ID 1 |
+| 19:45:16 | `STARTUP` → ORA-01081 | alert log `Shared memory area is accessible …` |
+| 20:07:23 | `SHUTDOWN ABORT` | alert log `Instance shutdown (abort) complete` |
+| 20:07:41 | `STARTUP` → 마운트 → 열림 | alert log `FREEPDB1 opened read write` · `Completed: ALTER DATABASE OPEN` |
+
+```
+2026-10-26T05:04:57  Starting ORACLE instance (normal)
+                     Using parameter settings in server-side spfile C:\APP\<사용자>\…\SPFILEFREE.ORA
+2026-10-26T05:04:58  Exception [type: ACCESS_VIOLATION, UNABLE_TO_READ] […, kghalf()+2343]
+                     ORA-07445: exception encountered: core dump [kghalf()+2343] [ACCESS_VIOLATION] …
+                     ORA-00600: internal error code, arguments: [17114], …
+2026-10-26T19:45:16  ERROR: Shared memory area is accessible to instance startup process
+                     prior to instance startup operation.
+```
+
+| 번호 | 뜻 |
+|---|---|
+| ORA-00600 | Oracle 내부 오류. Oracle 코드 안에서 예상하지 못한 상황이 생겼다는 뜻 |
+| ORA-07445 | Oracle 프로세스가 읽을 수 없는 메모리 주소를 읽으려다 멈춤 (ACCESS_VIOLATION) |
+| ORA-01081 | 이미 떠 있는 인스턴스는 다시 시작할 수 없음 |
+| ORA-01507 | 데이터베이스가 마운트되지 않음 |
+
+### 원인
+- **확정:** 자동 시작 1초 만에 Oracle 내부 오류가 나서 STARTED에서 멈췄다. 그 뒤에 `Database mounted` 줄이 없으므로 MOUNT 전 단계다.
+- **확정:** alert log 전체(9/26~)에서 인스턴스 시작은 30번이고, ORA-00600은 이번 1번뿐이다.
+- **추정:** X:와는 관계없다. MOUNT 전 단계에서는 C:의 파라미터 파일만 읽고, X:의 데이터 파일은 아직 쓰지 않는다. 3번과 같은 순서(정상 종료 → X: 꺼냄 → 시작 메뉴에서 재시작)였지만, 3번 때는 이 오류가 없었다.
+- **확인 못 함:** ORA-00600이 왜 났는지. 내부 오류라 alert log만으로는 알 수 없다. 자세한 기록은 trace 파일 `free_ora_5572.trc`에 있다.
+
+### 복구
+```sql
+-- X:는 미리 붙여 두었다 (19:41)
+sqlplus / as sysdba
+STARTUP                              -- ORA-01081 (이미 떠 있음)
+SELECT status FROM v$instance;       -- STARTED
+SELECT open_mode FROM v$database;    -- ORA-01507 (마운트 안 됨 = 열린 파일 없음)
+SHUTDOWN ABORT
+STARTUP                              -- 마운트 → 열림
+SELECT status FROM v$instance;       -- OPEN
+```
+
+`SHUTDOWN IMMEDIATE`는 열린 파일을 정리하면서 끄는 명령이다. 이번에는 시작 도중에 멈춰 열린 파일이 없었으므로(ORA-01507), `SHUTDOWN ABORT`로 남은 메모리와 프로세스만 치웠다. 다시 켠 뒤 FREEPDB1도 함께 열렸고(alert log `opened read write`), 리두 로그는 00:58에 닫을 때와 같은 32번에서 다시 열렸다(`Thread 1 closed at log sequence 32` → `Thread 1 opened at log sequence 32`).
+
+### 재발 방지
+원인을 모르므로 막을 방법도 아직 없다. 한 번뿐이어서 지켜본다. 같은 일이 생기면 위 순서대로 복구하고, alert log에 ORA-00600이 또 찍혔는지 확인한다.
+
+**배운 점:** `STARTUP`은 ORA-01081로 거부됐다. 이미 실행된 상태였기 때문이다. `v$instance`를 조회하니 STARTED 상태였고, `v$database`를 조회하니 열린 파일은 없었다. `SHUTDOWN ABORT`를 실행한 뒤 `STARTUP`을 하니 마운트되고 열렸다. 그래서 `STARTUP`이 ORA-01081로 거부되면 `v$instance`로 지금 상태를 보고, `SHUTDOWN ABORT`를 하기 전에는 `v$database`로 열린 파일이 있는지 확인한다.
