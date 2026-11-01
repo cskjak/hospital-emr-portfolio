@@ -208,16 +208,21 @@ role ──< staff ───── doctor      (의사만 이어짐)
 sql/01_create_tables.sql       테이블 7개 생성 (PK · FK · CHECK 포함)
 sql/02_create_auth_tables.sql  권한 테이블 4개 생성 (01번 다음에 실행)
 sql/load/*.ctl                 SQL*Loader 설정 (CSV → 테이블)
+scripts/load_data.ps1          CSV 11개를 부모 테이블부터 차례로 적재
 scripts/generate_data.ps1      가상 데이터 생성기 (시드 고정)
 scripts/generate_auth.ps1      권한 테이블 데이터 생성기 (시드 고정)
 ```
 
+모든 명령은 **저장소 맨 위 폴더에서** 실행한다. `.ctl`의 데이터 파일 경로(`INFILE 'data/....csv'`)가 실행한 폴더를 기준으로 하기 때문이다.
+
 1. SQL*Plus에서 `@sql/01_create_tables.sql` → `@sql/02_create_auth_tables.sql`
 2. 부모 테이블부터 적재: department → doctor → doctor_schedule → patient → reception → treatment → payment → role → menu → staff → role_menu
-   ```
-   sqlldr userid=<계정>@//localhost:1521/FREEPDB1 control=sql/load/department.ctl
-   ```
-   SQL*Plus 안에서 실행할 때는 앞에 `HOST`를 붙인다.
+   - 한 번에: `powershell -File scripts\load_data.ps1` (비밀번호는 한 번만 묻는다)
+   - 하나씩:
+     ```
+     sqlldr userid=<계정>@//localhost:1521/FREEPDB1 control=sql/load/department.ctl
+     ```
+     SQL*Plus 안에서 실행할 때는 앞에 `HOST`를 붙인다.
 3. 적재 후 행 수가 2번 표와 같은지 확인
 
 ## 9. JOIN 키 검증

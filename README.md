@@ -87,7 +87,22 @@ role ──< staff ───── doctor      (의사만 이어짐)
 
 `──<` 는 "하나 → 여러 개"다. 예: 진료과 1개에 의사 여러 명.
 
-데이터는 `scripts/`의 PowerShell 생성기로 만들었다(시드 고정 → 다시 돌려도 같은 값). 컬럼 설명 · 데이터 규칙 · Oracle에 넣는 순서는 [SQL.md](SQL.md) 1~8번에 있다.
+데이터는 `scripts/`의 PowerShell 생성기로 만들었다(시드 고정 → 다시 돌려도 같은 값). 컬럼 설명과 데이터 규칙은 [SQL.md](SQL.md) 1~7번에 있다.
+
+## 직접 만들어 보기
+
+Windows · Oracle 26ai Free 기준이다. 테이블을 만들 권한이 있는 `emr` 계정이 미리 있어야 하고, 모든 명령은 **저장소 맨 위 폴더에서** 실행한다.
+
+```
+sqlplus emr@//localhost:1521/FREEPDB1
+SQL> @sql/01_create_tables.sql
+SQL> @sql/02_create_auth_tables.sql
+SQL> exit
+
+powershell -File scripts\load_data.ps1
+```
+
+`load_data.ps1`은 비밀번호를 한 번만 묻고, CSV 11개를 부모 테이블부터 차례로 넣는다. 하나씩 넣는 방법은 [SQL.md](SQL.md) 8번, 넣은 뒤 맞춰 볼 행 수는 2번 표에 있다.
 
 ## 폴더 구성
 
@@ -101,5 +116,5 @@ role ──< staff ───── doctor      (의사만 이어짐)
 ├── SQL.md           데이터 구조 1~8 · SQL 실습 9~43
 ├── data/            CSV 11개 (가상 데이터)
 ├── sql/             테이블 생성 SQL 2개 · load/에 SQL*Loader 설정 11개
-└── scripts/         가상 데이터 생성기 2개 (PowerShell · 시드 고정)
+└── scripts/         CSV 적재 스크립트 1개 · 가상 데이터 생성기 2개 (PowerShell · 시드 고정)
 ```
