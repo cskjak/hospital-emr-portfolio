@@ -4,8 +4,9 @@
 # - 테이블이 비어 있을 때 한 번만 돌린다. (.ctl이 APPEND라서 다시 돌리면 기본키 중복으로 멈춘다)
 # - 비밀번호는 한 번만 묻는다. 명령 줄에 남지 않게 임시 parfile에 적었다가 끝나면 지운다.
 # - 로그 · bad 파일은 저장소 밖 임시 폴더(%TEMP%\hospital-emr-load)에 남는다.
-# 사용법: powershell -File scripts\load_data.ps1
-#         powershell -File scripts\load_data.ps1 -User emr -Service //localhost:1521/FREEPDB1
+# 사용법: powershell -ExecutionPolicy Bypass -File scripts\load_data.ps1
+#         powershell -ExecutionPolicy Bypass -File scripts\load_data.ps1 -User emr -Service //localhost:1521/FREEPDB1
+#         (-ExecutionPolicy Bypass는 이번 실행에만 적용 · PC의 실행 정책은 그대로)
 # ============================================================
 param(
     [string]$User    = 'emr',

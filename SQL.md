@@ -217,7 +217,7 @@ scripts/generate_auth.ps1      권한 테이블 데이터 생성기 (시드 고�
 
 1. SQL*Plus에서 `@sql/01_create_tables.sql` → `@sql/02_create_auth_tables.sql`
 2. 부모 테이블부터 적재: department → doctor → doctor_schedule → patient → reception → treatment → payment → role → menu → staff → role_menu
-   - 한 번에: `powershell -File scripts\load_data.ps1` (비밀번호는 한 번만 묻는다)
+   - 한 번에: `powershell -ExecutionPolicy Bypass -File scripts\load_data.ps1` (비밀번호는 한 번만 묻는다 · `Bypass`는 이번 실행에만 적용)
    - 하나씩:
      ```
      sqlldr userid=<계정>@//localhost:1521/FREEPDB1 control=sql/load/department.ctl

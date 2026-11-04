@@ -93,16 +93,27 @@ role ──< staff ───── doctor      (의사만 이어짐)
 
 Windows · Oracle 26ai Free 기준이다. 테이블을 만들 권한이 있는 `emr` 계정이 미리 있어야 하고, 모든 명령은 **저장소 맨 위 폴더에서** 실행한다.
 
-```
-sqlplus emr@//localhost:1521/FREEPDB1
-SQL> @sql/01_create_tables.sql
-SQL> @sql/02_create_auth_tables.sql
-SQL> exit
+1. SQL\*Plus로 접속한다
 
-powershell -File scripts\load_data.ps1
-```
+   ```
+   sqlplus emr@//localhost:1521/FREEPDB1
+   ```
 
-`load_data.ps1`은 비밀번호를 한 번만 묻고, CSV 11개를 부모 테이블부터 차례로 넣는다. 하나씩 넣는 방법은 [SQL.md](SQL.md) 8번, 넣은 뒤 맞춰 볼 행 수는 2번 표에 있다.
+   비밀번호를 넣고 `SQL>` 프롬프트가 나오면 한 줄씩 친다.
+
+   ```
+   @sql/01_create_tables.sql
+   @sql/02_create_auth_tables.sql
+   exit
+   ```
+
+2. CSV 11개를 적재한다
+
+   ```
+   powershell -ExecutionPolicy Bypass -File scripts\load_data.ps1
+   ```
+
+`load_data.ps1`은 비밀번호를 한 번만 묻고, CSV 11개를 부모 테이블부터 차례로 넣는다. `-ExecutionPolicy Bypass`는 이번 실행에만 스크립트를 허용하고 PC의 실행 정책은 바꾸지 않는다. 하나씩 넣는 방법은 [SQL.md](SQL.md) 8번, 넣은 뒤 맞춰 볼 행 수는 2번 표에 있다.
 
 ## 폴더 구성
 
