@@ -33,7 +33,8 @@ try {
     $plain = $null
 
     foreach ($t in $order) {
-        $rows = @(Get-Content -LiteralPath "data/$t.csv").Count - 1   # 첫 줄(컬럼명) 제외
+        # -Encoding UTF8이 없으면 Windows PowerShell 5.1은 CP949로 읽어서, 홀수 글자 한글로 끝나는 줄(role.csv의 간호사)이 다음 줄과 붙는다
+        $rows = @(Get-Content -LiteralPath "data/$t.csv" -Encoding UTF8).Count - 1   # 첫 줄(컬럼명) 제외
         $log  = Join-Path $logDir "$t.log"
         $bad  = Join-Path $logDir "$t.bad"
         Write-Host ('{0,-16} CSV {1,6:N0}행' -f $t, $rows)
