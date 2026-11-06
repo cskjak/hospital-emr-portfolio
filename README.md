@@ -40,7 +40,7 @@
 
 ## SQL 실습 — [SQL.md](SQL.md)
 
-외래 데이터(접수 9,362건)로 SQL 실습 36개(9~44번)를 했다. 쿼리마다 기준 숫자를 먼저 정하고, 틀린 쿼리와 맞는 쿼리를 나란히 놓고 비교했다. 예: 접수를 `dept_id`로 의사와 이으면 9,362건이 28,086줄(3배)이 된다(9번).
+외래 데이터(접수 9,362건)로 SQL 실습 37개(9~45번)를 했다. 쿼리마다 기준 숫자를 먼저 정하고, 틀린 쿼리와 맞는 쿼리를 나란히 놓고 비교했다. 예: 접수를 `dept_id`로 의사와 이으면 9,362건이 28,086줄(3배)이 된다(9번).
 
 | 번호 | 내용 |
 |---|---|
@@ -50,6 +50,7 @@
 | 41~42 | 실행계획 — 인덱스 전후 비교(FULL Cost 17 → INDEX RANGE SCAN Cost 3) · 인덱스가 있어도 FULL을 고르는 경우 |
 | 43 | 인라인 뷰 (묶은 결과를 다시 묶기) |
 | 44 | CHECK 제약 — 규칙을 DB가 지키게 하기 (ORA-02290 · 빈칸은 CHECK를 통과) |
+| 45 | 실행계획의 예상과 실제(`DISPLAY_CURSOR`) · clustering factor 8,331 vs 58 — 줄의 순서가 Oracle의 선택을 바꾼다 |
 
 25번에서 한 실수(조인 조건 양쪽에 같은 별칭 → 약 8,200만 줄)는 [SLOW_SQL.md](SLOW_SQL.md)에서 일부러 느린 SQL로 다시 썼다.
 
@@ -128,8 +129,8 @@ Windows · Oracle 26ai Free 기준이다. 테이블을 만들 권한이 있는 `
 ├── SLOW_SQL.md      느린 SQL
 ├── SPACE.md         공간 A~C
 ├── PRIVILEGES.md    DB 권한
-├── SQL.md           데이터 구조 1~8 · SQL 실습 9~44
+├── SQL.md           데이터 구조 1~8 · SQL 실습 9~45
 ├── data/            CSV 11개 (가상 데이터)
-├── sql/             테이블 생성 SQL 2개 · CHECK 제약 추가 1개 · load/에 SQL*Loader 설정 11개
+├── sql/             테이블 생성 SQL 2개 · CHECK 제약 추가 1개 · practice/에 실습 스크립트 · load/에 SQL*Loader 설정 11개
 └── scripts/         CSV 적재 스크립트 1개 · 가상 데이터 생성기 2개 (PowerShell · 시드 고정)
 ```
