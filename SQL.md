@@ -2135,3 +2135,5 @@ clustering_factor가 블록 수 정도로 줄자, 힌트 없이도 Oracle이 인
 | ③ | 41 · 42번을 실제로 실행 | E-Rows 2 → A-Rows 3 · 19 → 12 · FULL 61블록 vs 인덱스 15블록 |
 | ④ | Cost 계산 | 테이블 쪽 Cost = clustering_factor × 선택도 (세 번 모두 맞음) |
 | ⑤ | 환자 순서로 다시 쌓기 | clustering_factor 58 → 힌트 없이 INDEX RANGE SCAN · 5블록 |
+
+**해석:** 줄이 흩어져 있어서 인덱스가 비싸다.
