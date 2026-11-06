@@ -50,15 +50,16 @@ CREATE TABLE reception (
     status        VARCHAR2(2 CHAR)  CHECK (status IN ('정상','취소'))
 );
 
--- 진료 (접수 1건당 최대 1건 → reception_id UNIQUE)
+-- 진료 (접수 1건당 최대 1건 → reception_id UNIQUE · 끝 시각이 시작 시각보다 빠를 수 없음 → CHECK)
 CREATE TABLE treatment (
     treatment_id  NUMBER(10)  PRIMARY KEY,
     reception_id  NUMBER(10)  NOT NULL UNIQUE REFERENCES reception (reception_id),
     start_at      DATE,
-    end_at        DATE
+    end_at        DATE,
+    CONSTRAINT ck_treatment_end_after_start CHECK (end_at >= start_at)
 );
 
--- 수납 (접수 1건당 최대 1건 → reception_id UNIQUE)
+-- 수납 (접수 1건당 최대 1건 → reception_id UNIQUE · 총액 = 공단 + 본인 → CHECK)
 CREATE TABLE payment (
     payment_id        NUMBER(10)         PRIMARY KEY,
     reception_id      NUMBER(10)         NOT NULL UNIQUE REFERENCES reception (reception_id),
@@ -66,7 +67,8 @@ CREATE TABLE payment (
     total_amount      NUMBER(10),
     insurance_amount  NUMBER(10),
     patient_amount    NUMBER(10),
-    method            VARCHAR2(10 CHAR)
+    method            VARCHAR2(10 CHAR),
+    CONSTRAINT ck_payment_amount_sum CHECK (total_amount = insurance_amount + patient_amount)
 );
 
 -- 확인: 7개가 나오면 성공

@@ -106,6 +106,8 @@ role ──< staff ───── doctor      (의사만 이어짐)
 | start_at | 일시 | 진료 시작 |
 | end_at | 일시 | 진료 종료 |
 
+- 항상 `end_at >= start_at` (CHECK 제약 `ck_treatment_end_after_start`)
+
 ### payment — 수납
 | 컬럼 | 형식 | 설명 |
 |---|---|---|
@@ -117,7 +119,7 @@ role ──< staff ───── doctor      (의사만 이어짐)
 | patient_amount | 정수(원) | 본인 부담금 |
 | method | 문자 | 카드 / 간편결제 / 현금 |
 
-- 항상 `total_amount = insurance_amount + patient_amount`
+- 항상 `total_amount = insurance_amount + patient_amount` (CHECK 제약 `ck_payment_amount_sum`)
 
 ### role — 역할
 | 컬럼 | 형식 | 설명 |
@@ -194,6 +196,19 @@ role ──< staff ───── doctor      (의사만 이어짐)
 | 같은 접수에 수납 2건 | 0 |
 | 세션 시간을 넘긴 진료 | 0 |
 
+처음에는 이 검사를 쿼리로만 했다. 이 중 **한 줄 안에서 판단되는 규칙**은 CHECK 제약으로 옮겨서, 어기는 줄은 DB가 처음부터 받지 않게 했다 (`sql/01_create_tables.sql` · 이미 만든 DB는 `sql/03_add_constraints.sql`).
+
+| 규칙 | 지키는 곳 |
+|---|---|
+| 총액 = 공단 + 본인 | CHECK `ck_payment_amount_sum` |
+| 진료 끝 ≥ 진료 시작 (검산 표에 더함) | CHECK `ck_treatment_end_after_start` |
+| 없는 환자를 참조하지 않음 | FK |
+| 같은 접수에 수납은 1건까지 | UNIQUE |
+| 접수한 과 = 의사의 과 | 검산 쿼리 (`doctor(doctor_id, dept_id)`에 UNIQUE를 두면 복합 FK로 옮길 수 있다) |
+| 등록일시 ≤ 접수일시 · 취소 접수에 진료와 수납 없음 · 진료 시작 ≥ 접수 · 세션 시간 안에 진료 | 검산 쿼리 (다른 테이블의 줄과 비교해야 해서 CHECK로는 못 막는다) |
+
+CHECK는 비교 결과가 거짓일 때만 막는다. 금액이나 시각이 빈칸(NULL)이면 결과가 '알 수 없음'이 되어 통과하므로, 빈칸까지 막으려면 NOT NULL이 따로 있어야 한다.
+
 ## 7. 파일 형식
 
 - UTF-8 (BOM 없음) · 첫 줄은 컬럼명 · 구분자 쉼표 · 줄바꿈 LF
@@ -207,6 +222,7 @@ role ──< staff ───── doctor      (의사만 이어짐)
 ```
 sql/01_create_tables.sql       테이블 7개 생성 (PK · FK · CHECK 포함)
 sql/02_create_auth_tables.sql  권한 테이블 4개 생성 (01번 다음에 실행)
+sql/03_add_constraints.sql     이미 만든 DB에 CHECK 제약 2개 추가 (예전 01번으로 만든 DB만)
 sql/load/*.ctl                 SQL*Loader 설정 (CSV → 테이블)
 scripts/load_data.ps1          CSV 11개를 부모 테이블부터 차례로 적재
 scripts/generate_data.ps1      가상 데이터 생성기 (시드 고정)

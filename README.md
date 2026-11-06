@@ -126,6 +126,6 @@ Windows · Oracle 26ai Free 기준이다. 테이블을 만들 권한이 있는 `
 ├── PRIVILEGES.md    DB 권한
 ├── SQL.md           데이터 구조 1~8 · SQL 실습 9~43
 ├── data/            CSV 11개 (가상 데이터)
-├── sql/             테이블 생성 SQL 2개 · load/에 SQL*Loader 설정 11개
+├── sql/             테이블 생성 SQL 2개 · CHECK 제약 추가 1개 · load/에 SQL*Loader 설정 11개
 └── scripts/         CSV 적재 스크립트 1개 · 가상 데이터 생성기 2개 (PowerShell · 시드 고정)
 ```
