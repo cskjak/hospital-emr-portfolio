@@ -123,7 +123,7 @@ Windows · Oracle 26ai Free 기준이다. 테이블을 만들 권한이 있는 `
 ## 폴더 구성
 
 ```
-├── INCIDENTS.md     장애 기록 1~4
+├── INCIDENTS.md     장애 기록 1~5
 ├── BACKUP.md        백업·복구 A~F
 ├── LOCKS.md         세션·락 A~B
 ├── SLOW_SQL.md      느린 SQL
