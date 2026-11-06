@@ -1,6 +1,6 @@
 # 데이터 구조와 SQL 실습
 
-가상 병원 외래 데이터의 구조(1~8번)와, 그 데이터로 한 SQL 실습(9~44번)이다. 장애 기록과 운영 실습은 [README.md](README.md)에서 볼 수 있다.
+가상 병원 외래 데이터의 구조(1~8번)와, 그 데이터로 한 SQL 실습(9~45번)이다. 장애 기록과 운영 실습은 [README.md](README.md)에서 볼 수 있다.
 
 > ⚠️ **모든 데이터는 무작위로 만든 가상 데이터입니다.** 실제 병원·환자·의료진과 무관합니다.
 >
@@ -1836,7 +1836,7 @@ SELECT /*+ INDEX(reception idx_reception_patient) */ * FROM reception WHERE pati
 | 실행계획 | INDEX RANGE SCAN | FULL | FULL | INDEX RANGE SCAN |
 | Cost | 3 | 17 | 17 | 20 |
 
-41번에서 본 것처럼 한 환자의 줄도 블록 여러 개에 흩어져 있어서, 인덱스 경로는 줄마다 테이블 블록을 찾아간다. 그래서 찾는 줄이 많을수록 Cost가 커진다. FULL은 58블록을 다 읽으므로 줄 수와 상관없이 17이다. Oracle은 Cost가 작은 쪽을 고른다.
+41번에서 본 것처럼 한 환자의 줄도 블록 여러 개에 흩어져 있어서, 인덱스 경로는 줄마다 테이블 블록을 찾아간다. 그래서 찾는 줄이 많을수록 Cost가 커진다. FULL은 58블록을 다 읽으므로 줄 수와 상관없이 17이다. Oracle은 Cost가 작은 쪽을 고른다. 실제로 읽은 블록 수와 clustering factor로 확인한 것은 45번에 있다.
 
 **해석:** 인덱스 경로는 찾는 줄이 많을수록 Cost가 커지고, FULL은 찾는 줄 수와 상관없이 Cost가 17이다. 그래서 환자 10명(19줄)만 찾아도 Oracle은 FULL을 골랐다.
 
@@ -2020,3 +2020,120 @@ SELECT COUNT(*) AS 남은_시험줄 FROM payment WHERE payment_id < 0;
 | ⑥ | ROLLBACK | 시험 줄 0 |
 
 규칙마다 DB의 어디에서 지키는지는 6번 표에 있다.
+
+**해석:** 쿼리는 확인만 하고, 제약은 규칙을 어기는 줄이 아예 들어오지 못하게 막는다.
+
+## 45. 예상과 실제 · 인덱스가 비싼 이유 (DISPLAY_CURSOR · clustering factor)
+
+41 · 42번은 `EXPLAIN PLAN`이라 Oracle의 예상만 봤다. 이번에는 같은 쿼리를 실제로 실행해서 예상(E-Rows · Cost)과 실제(A-Rows · Buffers)를 나란히 보고, 42번에서 "한 환자의 줄이 블록 여러 개에 흩어져 있어서 인덱스가 비싸다"고 한 설명을 clustering factor로 확인했다 (2026-11-06 · [`sql/practice/45_clustering_factor.sql`](sql/practice/45_clustering_factor.sql)).
+
+```
+sqlplus / as sysdba @sql/practice/45_clustering_factor.sql
+```
+
+`DISPLAY_CURSOR`는 `v$sql_plan` 같은 뷰를 읽어야 하는데 `emr`에는 그 권한이 없어서 sysdba로 했다. 테이블은 `emr.`을 붙여 그대로 읽는다.
+
+| 단어 | 뜻 |
+|---|---|
+| `GATHER_PLAN_STATISTICS` | 실행하면서 단계마다 실제 줄 수와 읽은 블록 수를 모으라는 힌트 |
+| `DISPLAY_CURSOR(NULL, NULL, 'ALLSTATS LAST +COST')` | 방금 실행한 SQL의 실행계획을 예상과 실제를 함께 보여 준다 |
+| E-Rows / A-Rows | 예상 줄 수 / 실제 줄 수 |
+| Buffers | 실제로 읽은 블록 수. 윗줄은 아랫줄까지 더한 값이다 |
+| Reads | Buffers 중에서 디스크에서 읽어 온 블록 수 |
+| clustering_factor | 인덱스 순서대로 줄을 따라갈 때 테이블 블록이 바뀌는 횟수. 블록 수에 가까우면 줄이 모여 있고, 줄 수에 가까우면 흩어져 있다 |
+
+### ① 실행 전 예상
+
+| 무엇 | 예상 | 근거 |
+|---|---|---|
+| `idx_reception_patient`(patient_id)의 clustering_factor | 약 8,330 | CSV의 줄을 reception_id 순서로 블록에 채운다고 보고, patient_id 순서로 따라가며 블록이 바뀌는 횟수를 셌다 (블록당 150~175줄로 바꿔도 8,328~8,342). 42번 ③의 테이블 Cost 18로 거꾸로 계산하면 8,250~8,734 |
+| PK 인덱스(reception_id)의 clustering_factor | 블록 수(58)와 비슷 | 줄이 접수 순서로 쌓여 있다 |
+| 환자 순서로 다시 쌓은 복사본의 clustering_factor | 블록 수 정도로 작아진다 | |
+| 복사본에서 42번 ①과 같은 범위 | 힌트 없이도 INDEX RANGE SCAN | |
+
+### ② 같은 테이블, 인덱스 2개
+
+```sql
+SELECT table_name, num_rows, blocks, last_analyzed FROM dba_tables
+WHERE owner = 'EMR' AND table_name = 'RECEPTION';
+SELECT index_name, blevel, leaf_blocks, distinct_keys, clustering_factor, last_analyzed FROM dba_indexes
+WHERE owner = 'EMR' AND table_name = 'RECEPTION' ORDER BY index_name;
+```
+
+`reception`은 9,362줄 · 58블록이다.
+
+| 인덱스 | 칸 | LEAF_BLOCKS | DISTINCT_KEYS | CLUSTERING_FACTOR |
+|---|---|---:|---:|---:|
+| `SYS_C008676` (PK) | reception_id | 17 | 9,362 | **57** |
+| `IDX_RECEPTION_PATIENT` | patient_id | 23 | 4,853 | **8,331** |
+
+PK 쪽 57은 블록 수 58과 거의 같다. 줄이 접수 순서로 쌓여 있어서, reception_id 순서로 따라가면 블록이 거의 바뀌지 않는다. patient_id 쪽 8,331은 줄 수의 89%다. 환자 순서로 따라가면 거의 줄마다 블록이 바뀐다. 예상 8,330과 1 차이다.
+
+### ③ 예상과 실제 (원본 reception)
+
+41번과 42번의 세 쿼리를 `/*+ GATHER_PLAN_STATISTICS */`를 붙여 실행하고, 바로 뒤에 `DISPLAY_CURSOR`를 조회했다. 42번 ③(인덱스 강제)의 결과:
+
+```
+| Id  | Operation                           | Name                  | Starts | E-Rows | Cost (%CPU)| A-Rows |   A-Time  | Buffers |
+|   0 | SELECT STATEMENT                    |                       |      1 |        |    20 (100)|     12 |00:00:00.01 |      15 |
+|   1 |  TABLE ACCESS BY INDEX ROWID BATCHED| RECEPTION             |      1 |     19 |    20   (0)|     12 |00:00:00.01 |      15 |
+|*  2 |   INDEX RANGE SCAN                  | IDX_RECEPTION_PATIENT |      1 |     19 |     2   (0)|     12 |00:00:00.01 |       3 |
+```
+
+| | 41번 (환자 1명) | 42번 ① (환자 10명) | 42번 ③ (인덱스 강제) |
+|---|---|---|---|
+| 실행계획 | INDEX RANGE SCAN | TABLE ACCESS FULL | INDEX RANGE SCAN |
+| E-Rows → A-Rows | 2 → 3 | 19 → 12 | 19 → 12 |
+| Cost | 3 | 17 | 20 |
+| Buffers (인덱스 + 테이블) | 6 (3 + 3) | 61 | 15 (3 + 12) |
+| Reads | 3 | 55 | 없음 |
+
+- 인덱스 경로에서 테이블 쪽 Buffers는 줄 수와 같았다 (3줄 → 3블록, 12줄 → 12블록). 줄마다 다른 블록에 있다는 뜻이고, 41번에서 10000102의 3줄이 블록 938 · 947 · 966에 있던 것과 같은 모양이다.
+- FULL은 61블록을 읽었고 인덱스 강제는 15블록을 읽었다. 블록을 4배 넘게 더 읽는 FULL을 Oracle이 고른 것은, Cost가 블록 수가 아니라 걸릴 시간을 견준 값이고 FULL은 한 번에 여러 블록씩 읽는 것으로 계산하기 때문이다 (Oracle 문서 기준). 인덱스 경로는 실제 12줄이 아니라 예상 19줄로 계산된 것도 있다.
+- 42번 ①이 55블록을 디스크에서 읽어 온 뒤라 42번 ③에는 Reads가 없다 (모두 메모리에 있었다). A-Time도 모두 0.01초라서, 이 크기에서는 시간으로 비교할 수 없다.
+
+### ④ 테이블을 찾아가는 Cost = clustering_factor × 선택도
+
+인덱스로 테이블을 찾아가는 Cost(전체 Cost − 인덱스 줄의 Cost)를 clustering_factor × 선택도로 계산해 보면, 세 번 모두 실행계획의 숫자와 맞는다 (올림).
+
+| 쿼리 | 선택도 | clustering_factor | 곱 | 올림 | 실행계획 (전체 − 인덱스) |
+|---|---:|---:|---:|---:|---|
+| 41번 (환자 1명) | 1/4,853 = 0.000206 | 8,331 | 1.72 | 2 | 3 − 1 = **2** |
+| 42번 ③ (환자 10명) | 0.00206 | 8,331 | 17.2 | 18 | 20 − 2 = **18** |
+| ⑤ 복사본 (환자 10명) | 0.00206 | 58 | 0.12 | 1 | 3 − 2 = **1** |
+
+환자 10명의 선택도 0.00206은 범위 9/4,852에 1/4,853을 더한 값이고, 9,362 × 0.00206 = 19.3이 E-Rows 19다. 42번에서 환자 10명인데도 FULL을 고른 것은, 줄이 흩어져 있어서(8,331) 인덱스로 가면 줄마다 블록을 새로 읽는다고 계산했기 때문이다.
+
+### ⑤ 환자 순서로 다시 쌓으면
+
+데이터 · 인덱스 · 쿼리는 그대로 두고, 줄의 물리적 순서만 바꾼 복사본을 만들었다.
+
+```sql
+CREATE TABLE emr.reception_by_patient AS SELECT * FROM emr.reception ORDER BY patient_id, reception_id;
+CREATE INDEX emr.idx_rbp_patient ON emr.reception_by_patient (patient_id);
+EXEC DBMS_STATS.GATHER_TABLE_STATS('EMR', 'RECEPTION_BY_PATIENT');
+SELECT /*+ GATHER_PLAN_STATISTICS */ * FROM emr.reception_by_patient WHERE patient_id BETWEEN 10000001 AND 10000010;
+```
+
+| | 원본 `reception` | 환자 순서 복사본 |
+|---|---:|---:|
+| 블록 | 58 | 64 |
+| patient_id 인덱스의 clustering_factor | 8,331 | **58** |
+| 환자 10명: Oracle이 고른 길 | TABLE ACCESS FULL | **INDEX RANGE SCAN** (힌트 없음) |
+| Cost | 17 | 3 |
+| Buffers | 61 | 5 (인덱스 3 + 테이블 2) |
+
+clustering_factor가 블록 수 정도로 줄자, 힌트 없이도 Oracle이 인덱스를 골랐다. 12줄이 테이블 블록 2개에 모여 있어서 5블록만 읽었다. 42번의 설명("줄이 흩어져 있어서 인덱스 경로가 비싸다")이 맞았다. 복사본은 확인한 뒤 `DROP TABLE ... PURGE`로 지웠다.
+
+다만 한 테이블은 한 가지 순서로만 쌓을 수 있다. 환자 순서로 쌓으면 이번에는 reception_id 순서가 흩어져서 PK 쪽 clustering_factor가 커질 것이다 (이번에는 재지 않음).
+
+### 정리
+
+| 순서 | 한 일 | 결과 |
+|---|---|---|
+| ② | 통계 보기 | clustering_factor PK 57 · patient_id 8,331 (예상 8,330) |
+| ③ | 41 · 42번을 실제로 실행 | E-Rows 2 → A-Rows 3 · 19 → 12 · FULL 61블록 vs 인덱스 15블록 |
+| ④ | Cost 계산 | 테이블 쪽 Cost = clustering_factor × 선택도 (세 번 모두 맞음) |
+| ⑤ | 환자 순서로 다시 쌓기 | clustering_factor 58 → 힌트 없이 INDEX RANGE SCAN · 5블록 |
+
+**해석:** 줄이 흩어져 있어서 인덱스가 비싸다.
