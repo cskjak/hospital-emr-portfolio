@@ -369,3 +369,5 @@ ALTER PLUGGABLE DATABASE FREEPDB1 OPEN;
 - 2번의 끌 때 순서를 지킨다: `SHUTDOWN IMMEDIATE` → X: 꺼내기.
 - 1번의 평소 순서(다 쓰면 `ALTER TABLESPACE hospital OFFLINE` → X: 꺼내기)를 쓰면, X:를 꺼낼 때 그 파일은 이미 OFFLINE이라 Oracle이 쓰지 않으므로 이 장애도 막힐 것으로 본다 (추정). 11/06 22:28:16에 OFFLINE인 채로 X:를 꺼냈지만 2분이 안 돼 재시작해서(22:29:55 인스턴스 시작), 1~2시간 뒤에 터지는 이 장애가 막히는지는 아직 확인하지 못했다.
 - 확인 방법: OFFLINE → DB를 켠 채 X: 꺼내기 → 3시간쯤 뒤 alert log에 ORA-27037 · ORA-63999가 없는지, `v$pdbs`가 READ WRITE인지 본다.
+
+**배운 점:** ARCHIVELOG라서 인스턴스는 켜진 채 FREEPDB1만 닫혔다. 그래서 겉으로는 멀쩡해 보여도 alert log를 확인해야 한다.
