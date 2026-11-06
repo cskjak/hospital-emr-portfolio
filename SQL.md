@@ -1,6 +1,6 @@
 # 데이터 구조와 SQL 실습
 
-가상 병원 외래 데이터의 구조(1~8번)와, 그 데이터로 한 SQL 실습(9~43번)이다. 장애 기록과 운영 실습은 [README.md](README.md)에서 볼 수 있다.
+가상 병원 외래 데이터의 구조(1~8번)와, 그 데이터로 한 SQL 실습(9~44번)이다. 장애 기록과 운영 실습은 [README.md](README.md)에서 볼 수 있다.
 
 > ⚠️ **모든 데이터는 무작위로 만든 가상 데이터입니다.** 실제 병원·환자·의료진과 무관합니다.
 >
@@ -106,6 +106,8 @@ role ──< staff ───── doctor      (의사만 이어짐)
 | start_at | 일시 | 진료 시작 |
 | end_at | 일시 | 진료 종료 |
 
+- 항상 `end_at >= start_at` (CHECK 제약 `ck_treatment_end_after_start`)
+
 ### payment — 수납
 | 컬럼 | 형식 | 설명 |
 |---|---|---|
@@ -117,7 +119,7 @@ role ──< staff ───── doctor      (의사만 이어짐)
 | patient_amount | 정수(원) | 본인 부담금 |
 | method | 문자 | 카드 / 간편결제 / 현금 |
 
-- 항상 `total_amount = insurance_amount + patient_amount`
+- 항상 `total_amount = insurance_amount + patient_amount` (CHECK 제약 `ck_payment_amount_sum`)
 
 ### role — 역할
 | 컬럼 | 형식 | 설명 |
@@ -194,6 +196,19 @@ role ──< staff ───── doctor      (의사만 이어짐)
 | 같은 접수에 수납 2건 | 0 |
 | 세션 시간을 넘긴 진료 | 0 |
 
+처음에는 이 검사를 쿼리로만 했다. 이 중 **한 줄 안에서 판단되는 규칙**은 CHECK 제약으로 옮겨서, 어기는 줄은 DB가 처음부터 받지 않게 했다 (`sql/01_create_tables.sql` · 이미 만든 DB는 `sql/03_add_constraints.sql` · 실행 기록은 44번).
+
+| 규칙 | 지키는 곳 |
+|---|---|
+| 총액 = 공단 + 본인 | CHECK `ck_payment_amount_sum` |
+| 진료 끝 ≥ 진료 시작 (검산 표에 더함) | CHECK `ck_treatment_end_after_start` |
+| 없는 환자를 참조하지 않음 | FK |
+| 같은 접수에 수납은 1건까지 | UNIQUE |
+| 접수한 과 = 의사의 과 | 검산 쿼리 (`doctor(doctor_id, dept_id)`에 UNIQUE를 두면 복합 FK로 옮길 수 있다) |
+| 등록일시 ≤ 접수일시 · 취소 접수에 진료와 수납 없음 · 진료 시작 ≥ 접수 · 세션 시간 안에 진료 | 검산 쿼리 (다른 테이블의 줄과 비교해야 해서 CHECK로는 못 막는다) |
+
+CHECK는 비교 결과가 거짓일 때만 막는다. 금액이나 시각이 빈칸(NULL)이면 결과가 '알 수 없음'이 되어 통과하므로, 빈칸까지 막으려면 NOT NULL이 따로 있어야 한다.
+
 ## 7. 파일 형식
 
 - UTF-8 (BOM 없음) · 첫 줄은 컬럼명 · 구분자 쉼표 · 줄바꿈 LF
@@ -207,6 +222,7 @@ role ──< staff ───── doctor      (의사만 이어짐)
 ```
 sql/01_create_tables.sql       테이블 7개 생성 (PK · FK · CHECK 포함)
 sql/02_create_auth_tables.sql  권한 테이블 4개 생성 (01번 다음에 실행)
+sql/03_add_constraints.sql     이미 만든 DB에 CHECK 제약 2개 추가 (예전 01번으로 만든 DB만)
 sql/load/*.ctl                 SQL*Loader 설정 (CSV → 테이블)
 scripts/load_data.ps1          CSV 11개를 부모 테이블부터 차례로 적재
 scripts/generate_data.ps1      가상 데이터 생성기 (시드 고정)
@@ -1890,3 +1906,117 @@ FROM (SELECT cnt, COUNT(*) AS 환자수
 | ③ | 2 | 없음 (전체 합계) | 1 |
 
 **해석:** 접수 1건인 환자가 2,241명으로 가장 많고 8건은 1명이다. 검산하면 환자 4,853명, 접수 9,362줄로 원본과 같다.
+
+## 44. 규칙을 DB가 지키게 하기 (CHECK 제약 · ORA-02290)
+
+6번 검산에서 쿼리로 확인하던 규칙 가운데 한 줄 안에서 판단되는 2개를 CHECK 제약으로 옮겼다. 이미 데이터가 들어 있는 `emr`(FREEPDB1)의 테이블에 `sql/03_add_constraints.sql`로 추가하고, 일부러 규칙을 어기는 줄을 넣어 확인했다 (2026-11-06). 새로 만드는 DB는 `sql/01_create_tables.sql`에 같은 제약이 들어 있다.
+
+| 제약 이름 | 테이블 | 조건 |
+|---|---|---|
+| `ck_payment_amount_sum` | payment | `total_amount = insurance_amount + patient_amount` |
+| `ck_treatment_end_after_start` | treatment | `end_at >= start_at` |
+
+```
+sqlplus emr@//localhost:1521/FREEPDB1 @sql/03_add_constraints.sql
+```
+
+### ① 넣기 전에 어기는 줄 세기
+
+```sql
+SELECT COUNT(*) AS 총액_불일치 FROM payment WHERE total_amount <> insurance_amount + patient_amount;
+SELECT COUNT(*) AS 시각_역전 FROM treatment WHERE end_at < start_at;
+```
+
+| 총액_불일치 | 시각_역전 |
+|---:|---:|
+| 0 | 0 |
+
+### ② 제약 추가
+
+```sql
+ALTER TABLE payment ADD CONSTRAINT ck_payment_amount_sum
+    CHECK (total_amount = insurance_amount + patient_amount);
+ALTER TABLE treatment ADD CONSTRAINT ck_treatment_end_after_start
+    CHECK (end_at >= start_at);
+```
+
+두 문장 모두 `테이블이 변경되었습니다.` 따로 적지 않으면 `ENABLE VALIDATE`라서, 이미 있는 수납 8,787줄과 진료 8,960줄까지 검사한 뒤에 제약이 들어간다. 어기는 줄이 하나라도 있으면 ORA-02293으로 거부된다 (Oracle 문서 기준 · 이번에는 어기는 줄이 없어서 보지 못함). ①을 먼저 한 이유다.
+
+### ③ 들어갔는지 확인
+
+```sql
+SELECT table_name, constraint_name, search_condition_vc, status, validated
+FROM user_constraints
+WHERE constraint_name IN ('CK_PAYMENT_AMOUNT_SUM', 'CK_TREATMENT_END_AFTER_START')
+ORDER BY table_name;
+```
+
+| 테이블 | 제약 이름 | 조건 | STATUS | VALIDATED |
+|---|---|---|---|---|
+| PAYMENT | CK_PAYMENT_AMOUNT_SUM | total_amount = insurance_amount + patient_amount | ENABLED | VALIDATED |
+| TREATMENT | CK_TREATMENT_END_AFTER_START | end_at >= start_at | ENABLED | VALIDATED |
+
+`ENABLED`는 지금부터 들어오는 줄을 검사한다는 뜻이고, `VALIDATED`는 이미 있던 줄도 검사를 통과했다는 뜻이다.
+
+### ④ 규칙을 어기는 줄 넣어 보기
+
+5332는 취소 접수라 진료와 수납이 없다(6번 검산). 그래서 기본키 · UNIQUE · FK에는 걸리지 않고, 걸린다면 CHECK뿐이다.
+
+```sql
+INSERT INTO payment (payment_id, reception_id, paid_at, total_amount, insurance_amount, patient_amount, method)
+VALUES (-1, 5332, SYSDATE, 10000, 4000, 5000, '카드');
+INSERT INTO treatment (treatment_id, reception_id, start_at, end_at)
+VALUES (-1, 5332, SYSDATE, SYSDATE - 10/1440);
+```
+
+```
+ORA-02290: 체크 제약조건(EMR.CK_PAYMENT_AMOUNT_SUM)이 위배되었습니다
+ORA-02290: 체크 제약조건(EMR.CK_TREATMENT_END_AFTER_START)이 위배되었습니다
+```
+
+| 넣은 줄 | 어긴 규칙 | 결과 |
+|---|---|---|
+| 수납: 총액 10,000 · 공단 4,000 · 본인 5,000 | 4,000 + 5,000 = 9,000 ≠ 10,000 | ORA-02290 |
+| 진료: 끝 = 시작 − 10분 | 끝 < 시작 | ORA-02290 |
+
+제약에 이름을 붙여 두어서, 에러만 보고도 어느 규칙에 걸렸는지 알 수 있다. 이름 없이 만든 기존 CHECK(예: `status IN ('정상','취소')`)에는 `SYS_C`로 시작하는 이름이 자동으로 붙는다 (Oracle 문서 기준 · 직접 조회는 안 함).
+
+### ⑤ 금액이 빈칸(NULL)이면
+
+④의 수납 줄에서 총액만 빈칸으로 바꿨다.
+
+```sql
+INSERT INTO payment (payment_id, reception_id, paid_at, total_amount, insurance_amount, patient_amount, method)
+VALUES (-2, 5332, SYSDATE, NULL, 4000, 5000, '카드');
+```
+
+`1 개의 행이 만들어졌습니다.`
+
+| 총액 | `총액 = 4,000 + 5,000` | CHECK |
+|---|---|---|
+| 10,000 | 거짓 | 막음 (④) |
+| NULL | 알 수 없음 | 통과 (⑤) |
+
+CHECK는 조건이 거짓일 때만 막는다. 빈칸이 끼면 비교 결과가 '알 수 없음'이 되어 통과한다. 빈칸까지 막으려면 그 칸에 NOT NULL이 따로 있어야 한다.
+
+### ⑥ 되돌리기
+
+```sql
+ROLLBACK;
+SELECT COUNT(*) AS 남은_시험줄 FROM payment WHERE payment_id < 0;
+```
+
+`롤백이 완료되었습니다.` → 남은_시험줄 **0**. ④의 두 줄은 처음부터 들어가지 않았고, ⑤에서 들어간 1줄만 되돌아갔다. ②의 `ALTER TABLE`은 DDL이라 실행하는 순간 커밋되므로 ROLLBACK으로 되돌아가지 않는다 (Oracle 문서 기준 · 롤백 뒤에 제약을 다시 조회하지는 않음).
+
+### 정리
+
+| 순서 | 한 일 | 결과 |
+|---|---|---|
+| ① | 넣기 전에 어기는 줄 세기 | 0 · 0 |
+| ② | `ALTER TABLE ... ADD CONSTRAINT` 2개 | 테이블이 변경되었습니다 × 2 |
+| ③ | `user_constraints` 확인 | ENABLED · VALIDATED |
+| ④ | 규칙을 어기는 줄 2개 | ORA-02290 × 2 (제약 이름이 보임) |
+| ⑤ | 총액만 빈칸인 줄 | 들어감 (CHECK는 NULL을 막지 않음) |
+| ⑥ | ROLLBACK | 시험 줄 0 |
+
+규칙마다 DB의 어디에서 지키는지는 6번 표에 있다.

@@ -34,10 +34,11 @@
 | DB 느림<br>[SLOW_SQL.md](SLOW_SQL.md) | `v$session`과 `v$sql`을 SQL_ID로 이어 오래 도는 SQL 찾기 → `ALTER SYSTEM CANCEL SQL`로 세션은 두고 그 SQL만 취소 |
 | 디스크 부족<br>[SPACE.md](SPACE.md) | 사용률(%)의 분모 찾기 · 아카이브가 92MB 생겨도 사용률은 1.1% 그대로인데 분모(C: 남은 공간)는 92MB 줄어듦 · 같은 디스크에 백업하면 아카이브를 지워도 공간이 거의 안 돌아옴 |
 | 읽기 전용 계정<br>[PRIVILEGES.md](PRIVILEGES.md) | 계정 · ROLE · `GRANT` / `REVOKE` · 조회 권한이 없으면 테이블이 "존재하지 않는다"(ORA-00942)고 나옴 |
+| 잘못된 값 입력<br>[SQL.md](SQL.md) 44번 | 이미 데이터가 있는 테이블에 CHECK 제약 추가 · 규칙을 어기는 줄은 ORA-02290으로 거부 · 빈칸(NULL)은 CHECK가 막지 않아 NOT NULL이 따로 필요 |
 
 ## SQL 실습 — [SQL.md](SQL.md)
 
-외래 데이터(접수 9,362건)로 SQL 실습 35개(9~43번)를 했다. 쿼리마다 기준 숫자를 먼저 정하고, 틀린 쿼리와 맞는 쿼리를 나란히 놓고 비교했다. 예: 접수를 `dept_id`로 의사와 이으면 9,362건이 28,086줄(3배)이 된다(9번).
+외래 데이터(접수 9,362건)로 SQL 실습 36개(9~44번)를 했다. 쿼리마다 기준 숫자를 먼저 정하고, 틀린 쿼리와 맞는 쿼리를 나란히 놓고 비교했다. 예: 접수를 `dept_id`로 의사와 이으면 9,362건이 28,086줄(3배)이 된다(9번).
 
 | 번호 | 내용 |
 |---|---|
@@ -46,6 +47,7 @@
 | 30~40 | 권한 테이블(역할 · 메뉴) — 셀프 조인 · 테이블 4개 JOIN · `ON`과 `WHERE`의 차이 |
 | 41~42 | 실행계획 — 인덱스 전후 비교(FULL Cost 17 → INDEX RANGE SCAN Cost 3) · 인덱스가 있어도 FULL을 고르는 경우 |
 | 43 | 인라인 뷰 (묶은 결과를 다시 묶기) |
+| 44 | CHECK 제약 — 규칙을 DB가 지키게 하기 (ORA-02290 · 빈칸은 CHECK를 통과) |
 
 25번에서 한 실수(조인 조건 양쪽에 같은 별칭 → 약 8,200만 줄)는 [SLOW_SQL.md](SLOW_SQL.md)에서 일부러 느린 SQL로 다시 썼다.
 
@@ -124,8 +126,8 @@ Windows · Oracle 26ai Free 기준이다. 테이블을 만들 권한이 있는 `
 ├── SLOW_SQL.md      느린 SQL
 ├── SPACE.md         공간 A~C
 ├── PRIVILEGES.md    DB 권한
-├── SQL.md           데이터 구조 1~8 · SQL 실습 9~43
+├── SQL.md           데이터 구조 1~8 · SQL 실습 9~44
 ├── data/            CSV 11개 (가상 데이터)
-├── sql/             테이블 생성 SQL 2개 · load/에 SQL*Loader 설정 11개
+├── sql/             테이블 생성 SQL 2개 · CHECK 제약 추가 1개 · load/에 SQL*Loader 설정 11개
 └── scripts/         CSV 적재 스크립트 1개 · 가상 데이터 생성기 2개 (PowerShell · 시드 고정)
 ```
