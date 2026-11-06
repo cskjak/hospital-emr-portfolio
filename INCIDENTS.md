@@ -4,12 +4,14 @@
 
 | 번호 | 증상 | 원인 | 상태 |
 |---|---|---|---|
-| 1 | 부팅 뒤 DB가 MOUNTED에서 멈춤 | X:를 꺼낸 채 부팅 | 원인 확정 · 재발 방지 미정 |
+| 1 | 부팅 뒤 DB가 MOUNTED에서 멈춤 | X:를 꺼낸 채 부팅 | 원인 확정 · 재발 방지: 안 쓸 때 HOSPITAL OFFLINE (11/06 시험) |
 | 2 | 인스턴스가 꺼져 있음 (ORA-01034) | DB가 켜진 채 X:를 꺼냄 | 원인 확정 · 순서로 막음 |
-| 3 | 전체 DB는 열렸는데 FREEPDB1만 MOUNTED | 정상 종료 뒤 X:를 꺼낸 채 재부팅 | 원인 확정 · 1번과 다른 이유는 추정 |
+| 3 | 전체 DB는 열렸는데 FREEPDB1만 MOUNTED | 정상 종료 뒤 X:를 꺼낸 채 재부팅 | 원인 확정 · 1번과 다른 이유는 추정 · 재발 방지는 1번과 같음 |
 | 4 | 부팅 뒤 인스턴스가 STARTED에서 멈춤 · `STARTUP`은 ORA-01081 | 자동 시작 도중 Oracle 내부 오류 (ORA-00600) | 내부 오류의 원인은 확인 못 함 · 1번 발생 |
 
 1~3번은 X: 꺼내기에서 시작한다. 꺼내고 재부팅하면 1번(정상 종료 뒤였으면 3번), DB가 켜진 채 꺼내면 2번이다. 4번은 3번과 같은 순서로 재부팅했지만, X:의 파일을 쓰기도 전인 시작 단계에서 Oracle 내부 오류로 멈췄다.
+
+1~3번의 재발 방지는 1번 끝에 정리했다. X:를 안 쓸 때 HOSPITAL 테이블스페이스를 OFFLINE으로 두면, X: 없이 부팅해도 DB와 FREEPDB1이 열린다.
 
 ## 1. 부팅 뒤 MOUNTED에서 멈춤
 
@@ -65,14 +67,41 @@ SELECT status FROM v$instance;   -- OPEN
 SHOW PDBS                        -- FREEPDB1 READ WRITE
 ```
 
-### 재발 방지 (미정)
+### 재발 방지 — 안 쓸 때 HOSPITAL을 OFFLINE으로 (11/06 정함)
 | 방법 | 장점 | 단점 |
 |---|---|---|
 | 지금처럼 두고, 쓸 때마다 `ALTER DATABASE OPEN` | 암호화 유지 | 매번 수동 |
 | 서비스를 수동 시작으로 바꾸기 | 실패 기록이 안 쌓임 | 쓸 때마다 `STARTUP` |
 | 데이터 파일을 C:로 옮기기 | 부팅하면 자동으로 열림 | 암호화 보호가 사라짐 |
+| **안 쓸 때 HOSPITAL 테이블스페이스를 OFFLINE으로 두기** ✅ | 암호화 유지 · 부팅하면 자동으로 열림 | OFFLINE을 깜빡하거나 갑자기 꺼지면 예전과 같음 |
 
-데이터 보호와 자동으로 열리는 편의 중 하나를 골라야 하는 문제다.
+처음에는 데이터 보호와 자동으로 열리는 편의 중 하나를 골라야 하는 문제로 봤다. 그런데 문제는 DB 전체가 아니라 X:에 있는 파일 하나(17번 `HOSPITAL01.DBF`)였다. 그 파일이 속한 테이블스페이스를 쓰지 않을 때 OFFLINE으로 두면 Oracle이 시작할 때 그 파일을 찾지 않으므로, 둘 다 얻는다. [BACKUP.md](BACKUP.md) F에서 연습한 OFFLINE · ONLINE을 그대로 쓴다.
+
+#### 평소 순서 (sysdba · FREEPDB1)
+
+| 때 | 순서 |
+|---|---|
+| 쓸 때 | X: 붙이기 → `ALTER TABLESPACE hospital ONLINE;` |
+| 다 쓰면 | `ALTER TABLESPACE hospital OFFLINE;` → (Oracle도 끌 때는 `SHUTDOWN IMMEDIATE`) → X: 꺼내기 |
+| OFFLINE을 깜빡했거나 갑자기 꺼졌으면 | 예전처럼 X: 붙이기 → `ALTER DATABASE OPEN` 또는 `ALTER PLUGGABLE DATABASE FREEPDB1 OPEN` (1번 · 3번 복구) |
+
+#### 시험 (2026-11-06)
+
+| 시각 | 한 일 | 결과 | 근거 |
+|---|---|---|---|
+| 22:25 | `ALTER TABLESPACE hospital OFFLINE` | HOSPITAL ONLINE → OFFLINE | sqlplus `dba_tablespaces` |
+| 22:25 | `SELECT COUNT(*) FROM emr.reception` | ORA-00376 (지금은 파일 17을 읽을 수 없음) · ORA-01110 `X:\ORADATA\HOSPITAL01.DBF` | sqlplus |
+| 22:25~22:30 | PC 재시작 · X: 없이 부팅 | | |
+| 22:30:06 | 인스턴스 시작 | `Completed crash recovery` · 재시작이 정상 종료가 아니어서 복구부터 했다 | alert log |
+| 22:30:22 | DB · FREEPDB1 열림 | `Pluggable database FREEPDB1 opened read write` · `Completed: alter database open` · 그 사이 ORA-01157 없음 | alert log |
+| 22:30:43 | 상태 확인 | `v$instance` OPEN · FREEPDB1 READ WRITE | sqlplus |
+| 22:35 | X: 붙이기 → `ALTER TABLESPACE hospital ONLINE` | HOSPITAL ONLINE · `emr.reception` 9,362 | sqlplus |
+
+비정상 종료 뒤라 1번과 같은 조건(시작하면서 복구부터 함)이었는데도 열렸다. OFFLINE으로 둔 파일은 그 복구에서도 빠진다 (Oracle 문서 기준).
+
+#### 남은 것
+- OFFLINE 뒤에 Oracle을 켠 채로 X:를 꺼내도 인스턴스가 계속 도는지는 아직 확인하지 않았다 (2번 장애). 확인하기 전까지는 Oracle도 끌 때 `SHUTDOWN IMMEDIATE`를 먼저 한다.
+- RMAN으로 DB 전체를 백업할 때는 X:를 붙이고 ONLINE으로 둔다. OFFLINE이어도 백업 대상이라 X:가 없으면 파일을 읽지 못한다 (Oracle 문서 기준 · 직접 확인은 안 함).
 
 **배운 점:** 겉으로는 정상 실행인 것처럼 보였지만, 실제 원인은 드라이브 암호화 및 꺼내기 동작이었고, 그 때문에 DB가 마운트 상태에서 멈춰 있었다.
 
@@ -135,6 +164,8 @@ SHOW PDBS                        -- FREEPDB1 READ WRITE
 | 켤 때 | X: 붙이기 | `STARTUP` / `ALTER DATABASE OPEN` |
 | 끌 때 | `SHUTDOWN IMMEDIATE` | X: 꺼내기 |
 
+1번의 재발 방지(OFFLINE)를 쓰면 끌 때 맨 앞에 `ALTER TABLESPACE hospital OFFLINE`이 들어간다 (1번 평소 순서).
+
 **배운 점:** 오라클이 켜져 있는 동안 X:는 항상 붙어 있어야 한다. 오라클을 실행하기 전에 반드시 X:를 붙이고 암호화를 해제한 다음 실행해야 마운트 상태에서 멈추지 않고 정상 작동한다. X:를 꺼내기 전에는 오라클 종료를 먼저 해야 한다.
 
 ## 3. 전체 DB는 열렸는데 FREEPDB1만 MOUNTED
@@ -182,7 +213,9 @@ SELECT name, open_mode FROM v$pdbs;             -- FREEPDB1 READ WRITE
 ```
 
 ### 재발 방지
-1번과 같다(미정). 서비스가 자동 시작인 한, X:를 꺼낸 채 재부팅하면 다시 난다.
+1번과 같다. 안 쓸 때 HOSPITAL을 OFFLINE으로 두면 X:를 꺼낸 채 재부팅해도 FREEPDB1이 열린다 (1번 시험 · 11/06).
+
+10/27 06:19에도 FREEPDB1에서 같은 에러(ORA-01157 · OS 2 파일 없음)가 찍혀 있었다 (alert log 6758~6771행 · 그 앞뒤 상황은 확인하지 않음).
 
 **배운 점:** 끌 때 순서(SHUTDOWN → X: 꺼내기)를 지켜도, X:를 꺼낸 채로 PC를 재부팅 하면 Oracle이 자동으로 켜지면서 FREEPDB1이 멈춘다. 그래서 `v$instance`가 OPEN이어도 `v$pdbs` 까지 확인해야 한다.
 

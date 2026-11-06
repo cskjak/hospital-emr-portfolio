@@ -8,7 +8,7 @@
 
 ## 실제로 겪은 장애 — [INCIDENTS.md](INCIDENTS.md)
 
-테이블스페이스 `HOSPITAL`의 데이터 파일(`X:\ORADATA\HOSPITAL01.DBF`)은 BitLocker로 암호화한 가상 디스크 X:에 두고, 쓰지 않을 때는 꺼내 둔다. 1~3번은 X:를 꺼내는 데서 시작했다.
+테이블스페이스 `HOSPITAL`의 데이터 파일(`X:\ORADATA\HOSPITAL01.DBF`)은 BitLocker로 암호화한 가상 디스크 X:에 두고, 쓰지 않을 때는 꺼내 둔다. 1~3번은 X:를 꺼내는 데서 시작했고, 재발 방지는 X:를 안 쓸 때 HOSPITAL을 OFFLINE으로 두는 것으로 정해 시험했다.
 
 | 증상 | 확인한 것 | 조치 | 원인 |
 |---|---|---|---|
@@ -21,7 +21,8 @@
 
 장애를 겪고 정한 순서:
 
-- 켤 때는 X: 붙이기 → `STARTUP`, 끌 때는 `SHUTDOWN IMMEDIATE` → X: 꺼내기
+- X:를 안 쓸 때는 HOSPITAL 테이블스페이스를 OFFLINE으로 둔다. X: 없이 재부팅해도 DB와 FREEPDB1이 저절로 열린다 (11/06 시험 · 비정상 종료 뒤에도 열림)
+- 쓸 때는 X: 붙이기 → `ALTER TABLESPACE hospital ONLINE`, 다 쓰면 `OFFLINE` → X: 꺼내기
 - `v$instance`가 OPEN이어도 `v$pdbs`까지 확인한다
 - `STARTUP`이 ORA-01081로 거부되면 `v$instance`로 상태를 보고, `v$database`로 열린 파일이 없는지 확인한 뒤 `SHUTDOWN ABORT`
 
@@ -57,7 +58,7 @@
 |---|---|
 | DB | Oracle AI Database 26ai Free · 문자셋 AL32UTF8 |
 | 구성 | 인스턴스 `FREE` · PDB `FREEPDB1` · 스키마 `emr` |
-| 데이터 파일 | 테이블스페이스 `HOSPITAL` → `X:\ORADATA\HOSPITAL01.DBF` (최대 500MB) |
+| 데이터 파일 | 테이블스페이스 `HOSPITAL` → `X:\ORADATA\HOSPITAL01.DBF` (최대 500MB) · 안 쓸 때는 OFFLINE |
 | 컨트롤 파일 | C: — X:가 없어도 MOUNT까지는 된다 (장애 1번) |
 | 로그 모드 | ARCHIVELOG ([BACKUP.md](BACKUP.md) D에서 전환) |
 | 리두 · 아카이브 | 리두 로그 3개 × 200MB · 아카이브 `C:\oracle_archive` |
