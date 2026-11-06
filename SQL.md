@@ -2021,6 +2021,8 @@ SELECT COUNT(*) AS 남은_시험줄 FROM payment WHERE payment_id < 0;
 
 규칙마다 DB의 어디에서 지키는지는 6번 표에 있다.
 
+**해석:** 쿼리는 확인만 하고, 제약은 규칙을 어기는 줄이 아예 들어오지 못하게 막는다.
+
 ## 45. 예상과 실제 · 인덱스가 비싼 이유 (DISPLAY_CURSOR · clustering factor)
 
 41 · 42번은 `EXPLAIN PLAN`이라 Oracle의 예상만 봤다. 이번에는 같은 쿼리를 실제로 실행해서 예상(E-Rows · Cost)과 실제(A-Rows · Buffers)를 나란히 보고, 42번에서 "한 환자의 줄이 블록 여러 개에 흩어져 있어서 인덱스가 비싸다"고 한 설명을 clustering factor로 확인했다 (2026-11-06 · [`sql/practice/45_clustering_factor.sql`](sql/practice/45_clustering_factor.sql)).
