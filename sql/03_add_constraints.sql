@@ -34,7 +34,7 @@ VALUES (-1, 5332, SYSDATE, 10000, 4000, 5000, '카드');
 INSERT INTO treatment (treatment_id, reception_id, start_at, end_at)
 VALUES (-1, 5332, SYSDATE, SYSDATE - 10/1440);
 
--- 5. 금액이 빈칸(NULL)이면 CHECK는 막지 않는다 → 1 행이 생성되었습니다
+-- 5. 금액이 빈칸(NULL)이면 CHECK는 막지 않는다 → 1 개의 행이 만들어졌습니다
 --    NULL이 끼면 비교 결과가 '알 수 없음'이 되는데, CHECK는 결과가 거짓일 때만 막는다
 INSERT INTO payment (payment_id, reception_id, paid_at, total_amount, insurance_amount, patient_amount, method)
 VALUES (-2, 5332, SYSDATE, NULL, 4000, 5000, '카드');
