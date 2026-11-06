@@ -1,6 +1,6 @@
 # 🏥 가상 병원 외래 DB — Oracle DBA 포트폴리오
 
-의료기관 전산 운영 업무를 하면서 DB 쪽에 관심이 생겨, 가상 병원 외래 DB를 직접 설계해 Oracle에 올렸습니다. 이 DB를 쓰면서 실제로 겪은 장애 4건과, 백업·복구 · 세션·락 · 느린 SQL · 공간 · 권한을 직접 해 보며 확인한 기록입니다.
+의료기관 전산 운영 업무를 하면서 DB 쪽에 관심이 생겨, 가상 병원 외래 DB를 직접 설계해 Oracle에 올렸습니다. 이 DB를 쓰면서 실제로 겪은 장애 5건과, 백업·복구 · 세션·락 · 느린 SQL · 공간 · 권한을 직접 해 보며 확인한 기록입니다.
 
 **환경** Oracle AI Database 26ai Free · Windows · SQL\*Plus · RMAN · Data Pump · SQL\*Loader · PowerShell
 
@@ -8,7 +8,7 @@
 
 ## 실제로 겪은 장애 — [INCIDENTS.md](INCIDENTS.md)
 
-테이블스페이스 `HOSPITAL`의 데이터 파일(`X:\ORADATA\HOSPITAL01.DBF`)은 BitLocker로 암호화한 가상 디스크 X:에 두고, 쓰지 않을 때는 꺼내 둔다. 1~3번은 X:를 꺼내는 데서 시작했다.
+테이블스페이스 `HOSPITAL`의 데이터 파일(`X:\ORADATA\HOSPITAL01.DBF`)은 BitLocker로 암호화한 가상 디스크 X:에 두고, 쓰지 않을 때는 꺼내 둔다. 1~3번과 5번은 X:를 꺼내는 데서 시작했고, 재발 방지는 X:를 안 쓸 때 HOSPITAL을 OFFLINE으로 두는 것으로 정해 시험했다.
 
 | 증상 | 확인한 것 | 조치 | 원인 |
 |---|---|---|---|
@@ -16,12 +16,14 @@
 | 2. 인스턴스 꺼짐 (ORA-01034) | alert log ORA-01242 → CKPT가 인스턴스 종료 | X: 붙이기 → `STARTUP` | DB가 켜진 채 X:를 꺼냄 |
 | 3. FREEPDB1만 MOUNTED (ORA-01109) | `v$instance` OPEN · `v$pdbs` MOUNTED | `ALTER PLUGGABLE DATABASE FREEPDB1 OPEN` | 정상 종료 뒤 X:를 꺼낸 채 재부팅 |
 | 4. `STARTUP` 거부 (ORA-01081) | `v$instance` STARTED · `v$database` ORA-01507 | `SHUTDOWN ABORT` → `STARTUP` | 자동 시작 중 Oracle 내부 오류(ORA-00600) · 내부 오류의 원인은 확인 못 함 |
+| 5. FREEPDB1만 닫힘 (ORA-01109) | `v$pdbs` MOUNTED · alert log ORA-63999 → `FREEPDB1 closed` · Windows 기록과 시각 대조 | X: 붙이기 → `ALTER PLUGGABLE DATABASE FREEPDB1 OPEN` | DB가 켜진 채 X:를 꺼냄 → ARCHIVELOG라 인스턴스 대신 FREEPDB1만 닫힘 |
 
 원인은 alert log와 Windows 이벤트 로그(가상 디스크를 붙이고 꺼낸 시각)를 맞춰 보며 찾았고, 확정한 것 · 추정한 것 · 확인 못 한 것을 나눠 적었다.
 
 장애를 겪고 정한 순서:
 
-- 켤 때는 X: 붙이기 → `STARTUP`, 끌 때는 `SHUTDOWN IMMEDIATE` → X: 꺼내기
+- X:를 안 쓸 때는 HOSPITAL 테이블스페이스를 OFFLINE으로 둔다. X: 없이 재부팅해도 DB와 FREEPDB1이 저절로 열린다 (11/06 시험 · 비정상 종료 뒤에도 열림)
+- 쓸 때는 X: 붙이기 → `ALTER TABLESPACE hospital ONLINE`, 다 쓰면 `OFFLINE` → X: 꺼내기
 - `v$instance`가 OPEN이어도 `v$pdbs`까지 확인한다
 - `STARTUP`이 ORA-01081로 거부되면 `v$instance`로 상태를 보고, `v$database`로 열린 파일이 없는지 확인한 뒤 `SHUTDOWN ABORT`
 
@@ -57,7 +59,7 @@
 |---|---|
 | DB | Oracle AI Database 26ai Free · 문자셋 AL32UTF8 |
 | 구성 | 인스턴스 `FREE` · PDB `FREEPDB1` · 스키마 `emr` |
-| 데이터 파일 | 테이블스페이스 `HOSPITAL` → `X:\ORADATA\HOSPITAL01.DBF` (최대 500MB) |
+| 데이터 파일 | 테이블스페이스 `HOSPITAL` → `X:\ORADATA\HOSPITAL01.DBF` (최대 500MB) · 안 쓸 때는 OFFLINE |
 | 컨트롤 파일 | C: — X:가 없어도 MOUNT까지는 된다 (장애 1번) |
 | 로그 모드 | ARCHIVELOG ([BACKUP.md](BACKUP.md) D에서 전환) |
 | 리두 · 아카이브 | 리두 로그 3개 × 200MB · 아카이브 `C:\oracle_archive` |
