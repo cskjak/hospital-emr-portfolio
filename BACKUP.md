@@ -164,7 +164,7 @@ RMAN> RESTORE DATABASE VALIDATE;
 |---|---|
 | 열린 DB는 백업할 수 없고 MOUNT에서만 된다 | 실험 (RMAN-06149) |
 | 데이터 파일 하나가 고장 나면 인스턴스 전체가 종료된다 | 로그 ([INCIDENTS.md](INCIDENTS.md) 2번 · ORA-01242) |
-| ARCHIVELOG였다면 고장 난 파일만 offline으로 내리고 DB는 계속 돈다 | Oracle 문서 기준 · 직접 확인은 안 함 |
+| ARCHIVELOG에서는 데이터 파일 하나가 고장 나도 인스턴스는 계속 돈다. 다만 그 파일이 있는 FREEPDB1은 닫힌다 | 로그 ([INCIDENTS.md](INCIDENTS.md) 5번 · ORA-63999). 처음에는 "고장 난 파일만 offline으로 내린다"고 적었는데, 실제로는 FREEPDB1 전체가 닫혔다 |
 | 되살리면 백업한 시점으로만 돌아가고, 그 뒤 변경은 사라진다 | 개념 · 직접 확인은 안 함 |
 
 **해석:** NOARCHIVELOG 모드에서는 DB가 열려 있으면 Oracle이 백업 시도조차 거부한다(RMAN-06149). 그래서 MOUNT 상태에서 백업을 시도하니 정상적으로 됐다. 데이터 파일 12개(3.8GB)가 백업 조각 3개(2.9GB)로 줄었다. `VALIDATE`는 검사만 해서 건드린 파일은 없다.

@@ -8,10 +8,11 @@
 | 2 | 인스턴스가 꺼져 있음 (ORA-01034) | DB가 켜진 채 X:를 꺼냄 | 원인 확정 · 순서로 막음 |
 | 3 | 전체 DB는 열렸는데 FREEPDB1만 MOUNTED | 정상 종료 뒤 X:를 꺼낸 채 재부팅 | 원인 확정 · 1번과 다른 이유는 추정 · 재발 방지는 1번과 같음 |
 | 4 | 부팅 뒤 인스턴스가 STARTED에서 멈춤 · `STARTUP`은 ORA-01081 | 자동 시작 도중 Oracle 내부 오류 (ORA-00600) | 내부 오류의 원인은 확인 못 함 · 1번 발생 |
+| 5 | 전체 DB는 열려 있는데 FREEPDB1만 닫힘 (ORA-01109) · 재부팅 없음 | DB가 켜진 채 X:를 꺼냄 · ARCHIVELOG라 인스턴스 대신 FREEPDB1이 닫힘 (ORA-63999) | 원인 확정 · 2번 순서로 막음 · OFFLINE으로도 막히는지는 확인 전 · 2번 발생 |
 
-1~3번은 X: 꺼내기에서 시작한다. 꺼내고 재부팅하면 1번(정상 종료 뒤였으면 3번), DB가 켜진 채 꺼내면 2번이다. 4번은 3번과 같은 순서로 재부팅했지만, X:의 파일을 쓰기도 전인 시작 단계에서 Oracle 내부 오류로 멈췄다.
+1~3번은 X: 꺼내기에서 시작한다. 꺼내고 재부팅하면 1번(정상 종료 뒤였으면 3번), DB가 켜진 채 꺼내면 2번이다(ARCHIVELOG로 바꾼 뒤에는 5번). 4번은 3번과 같은 순서로 재부팅했지만, X:의 파일을 쓰기도 전인 시작 단계에서 Oracle 내부 오류로 멈췄다.
 
-1~3번의 재발 방지는 1번 끝에 정리했다. X:를 안 쓸 때 HOSPITAL 테이블스페이스를 OFFLINE으로 두면, X: 없이 부팅해도 DB와 FREEPDB1이 열린다.
+1~3번과 5번의 재발 방지는 1번 끝에 정리했다. X:를 안 쓸 때 HOSPITAL 테이블스페이스를 OFFLINE으로 두면, X: 없이 부팅해도 DB와 FREEPDB1이 열린다.
 
 ## 1. 부팅 뒤 MOUNTED에서 멈춤
 
@@ -291,3 +292,78 @@ SELECT status FROM v$instance;       -- OPEN
 원인을 모르므로 막을 방법도 아직 없다. 한 번뿐이어서 지켜본다. 같은 일이 생기면 위 순서대로 복구하고, alert log에 ORA-00600이 또 찍혔는지 확인한다.
 
 **배운 점:** `STARTUP`은 ORA-01081로 거부됐다. 이미 실행된 상태였기 때문이다. `v$instance`를 조회하니 STARTED 상태였고, `v$database`를 조회하니 열린 파일은 없었다. `SHUTDOWN ABORT`를 실행한 뒤 `STARTUP`을 하니 마운트되고 열렸다. 그래서 `STARTUP`이 ORA-01081로 거부되면 `v$instance`로 지금 상태를 보고, `SHUTDOWN ABORT`를 하기 전에는 `v$database`로 열린 파일이 있는지 확인한다.
+
+## 5. 전체 DB는 열려 있는데 FREEPDB1만 닫힘 (ORA-63999 · ARCHIVELOG)
+
+### 증상
+- 11/04 12:53: 시험용 계정을 만들다가 `ORA-01109`(데이터베이스가 개방되지 않음). `v$pdbs` → `FREEPDB1  MOUNTED`
+- 11/06 20:17: `emr` 접속이 `ORA-01109`로 실패. `v$pdbs` → `FREEPDB1  MOUNTED`
+- 3번과 같은 모양이지만, 그 사이에 인스턴스가 다시 시작된 적이 없다 (alert log의 `Starting ORACLE instance`가 11/02 04:39 다음은 11/06 22:29). 그래서 처음에는 3번의 재발로 봤지만 아니었다. 3번이었다면 찍혔을 ORA-01157도 10/27 06:19 이후로는 없다.
+
+### 증거 (alert log + Windows 기록)
+
+시작 · 닫힘 · 열림 줄만 시각과 함께 뽑았다 (줄 번호는 alert log 기준).
+
+| 시각 | 일어난 일 | 근거 |
+|---|---|---|
+| 11/02 04:39:30 | 인스턴스 시작 → 04:39:39 FREEPDB1 열림 | alert log 7295 · 7404행 |
+| 11/02 04:58:00 | X: 꺼냄 · DB는 켜진 채 | `VHDMP-Operational` ID 2 |
+| 11/02 06:05:57 | CKPT `ORA-63999` → `FREEPDB1 closed` | alert log 7439 · 7458행 |
+| 11/04 12:50:17 | X: 붙임 | `VHDMP-Operational` ID 1 |
+| 11/04 12:57:16 | `ALTER PLUGGABLE DATABASE FREEPDB1 OPEN` → 열림 | alert log 7630행 |
+| 11/04 13:13:55 | X: 꺼냄 · DB는 켜진 채 | `VHDMP-Operational` ID 2 |
+| 11/04 15:05:28 | CKPT `ORA-63999` → 15:05:29 `FREEPDB1 closed` | alert log 7693 · 7712행 |
+| 11/06 19:50:31 | X: 붙임 | `VHDMP-Operational` ID 1 |
+| 11/06 20:23:12 | `ALTER PLUGGABLE DATABASE FREEPDB1 OPEN` → 열림 | alert log 7869행 |
+
+11/04 15:05 앞뒤의 alert log (한 줄씩 줄임):
+
+```
+FREEPDB1(3):Errors in file …free_m004….trc:
+ORA-27037: 파일 상태를 얻을 수 없습니다        (7650~7676행에 여러 번)
+Errors in file …free_ckpt….trc:
+ORA-63999: 데이터 파일에서 매체 오류가 발생했습니다.
+ORA-01565: X:\ORADATA\HOSPITAL01.DBF 파일을 식별하는 중 오류가 발생했습니다.
+ORA-27037: 파일 상태를 얻을 수 없습니다
+While transitioning the pdb 3 to clean state, clearing all its abort bits in the control file.
+Completed: Pluggable database FREEPDB1 closed services=None
+```
+
+| 번호 | 뜻 |
+|---|---|
+| ORA-27037 | 파일 상태를 얻을 수 없음 (X:가 없음) |
+| ORA-63999 | 데이터 파일 고장(매체 오류) |
+| ORA-01565 | 그 파일을 알아보지 못함 · 17번 `HOSPITAL01.DBF` |
+
+X:를 꺼내고 ORA-63999가 나기까지 1시간 8분(11/02), 1시간 52분(11/04)이 걸렸다. 두 번 다 FREEPDB1이 닫힌 줄 모른 채 이틀 넘게 지나갔고, 다음에 쓰려고 할 때 ORA-01109로 알았다.
+
+### 원인
+- **확정:** DB가 켜진 채 X:를 꺼냈다 (VHDMP). 2번 재발 방지의 끌 때 순서(`SHUTDOWN IMMEDIATE` → X: 꺼내기)를 건너뛴 것이다.
+- **확정:** CKPT가 그 파일에서 ORA-63999를 냈고, Oracle은 인스턴스는 그대로 두고 FREEPDB1만 닫았다 (ckpt trace · `FREEPDB1 closed`).
+
+### 2번과 결과가 다른 이유
+
+| | 2번 (10월) | 5번 (11월) |
+|---|---|---|
+| 로그 모드 | NOARCHIVELOG | ARCHIVELOG ([BACKUP.md](BACKUP.md) D에서 바꿈) |
+| 데이터 파일 고장 뒤 | ORA-01242 → CKPT가 **인스턴스 전체**를 종료 | ORA-63999 → **FREEPDB1만** 닫힘 · 인스턴스는 계속 돎 |
+| 다음 접속 | ORA-01034 (인스턴스 없음) | ORA-01109 (FREEPDB1이 열려 있지 않음) |
+| X:를 꺼내고 터지기까지 | 33분 ~ 약 11시간 (2번 증거 2) | 1시간 8분 · 1시간 52분 |
+
+[BACKUP.md](BACKUP.md) C에 "ARCHIVELOG였다면 고장 난 파일만 offline으로 내리고 DB는 계속 돈다 (직접 확인은 안 함)"고 적어 두었다. 인스턴스가 계속 도는 것은 맞았지만, 파일만 내려간 것이 아니라 그 파일이 있는 FREEPDB1 전체가 닫혔다.
+
+### 복구
+X:를 먼저 붙이고 (vhdx 열기 → BitLocker 비밀번호), `sqlplus / as sysdba`에서:
+
+```sql
+SELECT status FROM v$instance;
+SELECT name, open_mode FROM v$pdbs;
+ALTER PLUGGABLE DATABASE FREEPDB1 OPEN;
+```
+
+`v$instance`는 OPEN, FREEPDB1은 MOUNTED였고, OPEN 뒤에 READ WRITE가 됐다 (11/04 · 11/06 둘 다).
+
+### 재발 방지
+- 2번의 끌 때 순서를 지킨다: `SHUTDOWN IMMEDIATE` → X: 꺼내기.
+- 1번의 평소 순서(다 쓰면 `ALTER TABLESPACE hospital OFFLINE` → X: 꺼내기)를 쓰면, X:를 꺼낼 때 그 파일은 이미 OFFLINE이라 Oracle이 쓰지 않으므로 이 장애도 막힐 것으로 본다 (추정). 11/06 22:28:16에 OFFLINE인 채로 X:를 꺼냈지만 2분이 안 돼 재시작해서(22:29:55 인스턴스 시작), 1~2시간 뒤에 터지는 이 장애가 막히는지는 아직 확인하지 못했다.
+- 확인 방법: OFFLINE → DB를 켠 채 X: 꺼내기 → 3시간쯤 뒤 alert log에 ORA-27037 · ORA-63999가 없는지, `v$pdbs`가 READ WRITE인지 본다.
